@@ -9,6 +9,7 @@ bot = telebot.TeleBot(TOKEN)
 
 BASE_DIR = 'user_files'
 STICKER_DIR = 'stickers'
+ADMIN_ID = 1663567950  # Admin Telegram ID
 
 # --- Foydalanuvchi papkasi ---
 def get_user_dir(user_id):
@@ -25,6 +26,10 @@ def send_sticker(chat_id, name):
     if os.path.exists(path):
         with open(path, 'rb') as f:
             bot.send_sticker(chat_id, f)
+
+def log_to_admin(sender_type, user, text):
+    log_msg = f"\ud83d\udce9 {sender_type}:\n\ud83d\udc64 {user.first_name} (ID: {user.id})\n\ud83d\udcac {text}"
+    bot.send_message(ADMIN_ID, log_msg)
 
 @bot.message_handler(content_types=['document'])
 def handle_files(message):
@@ -43,15 +48,19 @@ def handle_files(message):
 
     file_count = count_user_files(user_id)
     send_sticker(message.chat.id, 'ok')
-    bot.reply_to(message, f"Fayl saqlandi ✅\nJami {file_count} ta fayl bor.")
+    reply_msg = f"Fayl saqlandi \u2705\nJami {file_count} ta fayl bor."
+    bot.reply_to(message, reply_msg)
     send_options(message.chat.id)
+
+    log_to_admin("Foydalanuvchi yubordi", message.from_user, message.document.file_name)
+    log_to_admin("Bot yubordi", message.from_user, reply_msg)
 
 def send_options(chat_id):
     markup = InlineKeyboardMarkup()
     markup.add(
-        InlineKeyboardButton("📤 Yana fayl yuboraman", callback_data="send_file"),
-        InlineKeyboardButton("📦 ZIP nomini kiritaman", callback_data="zip_now"),
-        InlineKeyboardButton("🗑 Tozalash", callback_data="clear_files")
+        InlineKeyboardButton("\ud83d\udce4 Yana fayl yuboraman", callback_data="send_file"),
+        InlineKeyboardButton("\ud83d\udce6 ZIP nomini kiritaman", callback_data="zip_now"),
+        InlineKeyboardButton("\ud83d\uddd1 Tozalash", callback_data="clear_files")
     )
     bot.send_message(chat_id, "Nima qilamiz?", reply_markup=markup)
 
@@ -61,16 +70,22 @@ def handle_callback(call):
     user_dir = get_user_dir(user_id)
 
     if call.data == "send_file":
-        bot.send_message(call.message.chat.id, "Yana fayl yuboring 📎")
+        msg = "Yana fayl yuboring \ud83d\udcce"
+        bot.send_message(call.message.chat.id, msg)
+        log_to_admin("Bot yubordi", call.from_user, msg)
 
     elif call.data == "zip_now":
-        bot.send_message(call.message.chat.id, "ZIP fayl nomini yozing:")
+        msg = "ZIP fayl nomini yozing:"
+        bot.send_message(call.message.chat.id, msg)
+        log_to_admin("Bot yubordi", call.from_user, msg)
 
     elif call.data == "clear_files":
         if os.path.exists(user_dir):
             shutil.rmtree(user_dir)
-        bot.send_message(call.message.chat.id, "Barcha fayllar o‘chirildi.")
+        msg = "Barcha fayllar o\u2018chirildi."
+        bot.send_message(call.message.chat.id, msg)
         send_sticker(call.message.chat.id, 'trash')
+        log_to_admin("Bot yubordi", call.from_user, msg)
 
 @bot.message_handler(func=lambda message: message.text and not message.text.startswith('/'))
 def handle_zip_name(message):
@@ -79,7 +94,9 @@ def handle_zip_name(message):
     zip_name = message.text.strip()
 
     if not os.listdir(user_dir):
-        bot.reply_to(message, "Siz hech qanday fayl yubormagansiz.")
+        msg = "Siz hech qanday fayl yubormagansiz."
+        bot.reply_to(message, msg)
+        log_to_admin("Bot yubordi", message.from_user, msg)
         return
 
     zip_path = os.path.join(BASE_DIR, f"{zip_name}.zip")
@@ -89,17 +106,23 @@ def handle_zip_name(message):
                 zipf.write(os.path.join(root, file), arcname=file)
 
     with open(zip_path, 'rb') as f:
-        bot.send_document(message.chat.id, f, caption="📦 ZIP tayyor!")
+        bot.send_document(message.chat.id, f, caption="\ud83d\udce6 ZIP tayyor!")
 
     send_sticker(message.chat.id, 'done')
     shutil.rmtree(user_dir)
     os.remove(zip_path)
 
+    log_to_admin("Foydalanuvchi yubordi", message.from_user, message.text)
+    log_to_admin("Bot yubordi", message.from_user, f"ZIP fayl '{zip_name}.zip' yuborildi")
+
 @bot.message_handler(commands=['start'])
 def start_handler(message):
-    bot.send_message(message.chat.id, "👋 Salom! Men fayllarni ZIP qilib qaytaraman.")
+    bot.send_message(message.chat.id, "\ud83d\udc4b Salom! Men fayllarni ZIP qilib qaytaraman.")
     send_sticker(message.chat.id, 'start')
     send_options(message.chat.id)
+
+    log_to_admin("Foydalanuvchi yubordi", message.from_user, "/start")
+    log_to_admin("Bot yubordi", message.from_user, "Salom va tugmalar yuborildi")
 
 # --- Run ---
 if __name__ == '__main__':
