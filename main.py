@@ -4,7 +4,7 @@ import zipfile
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-TOKEN = '6655819779:AAGpqhFnMEXmhZf-YQJrDh5Pgn2fKLnUJXo'
+TOKEN = '7579799414:AAFubjp6EdJySpv8tQHxvkpgO1i3fM45kKg'
 bot = telebot.TeleBot(TOKEN)
 
 BASE_DIR = 'user_files'
