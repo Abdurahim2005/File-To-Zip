@@ -7,11 +7,11 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 TOKEN = '7579799414:AAFubjp6EdJySpv8tQHxvkpgO1i3fM45kKg'
 bot = telebot.TeleBot(TOKEN)
 
+
 BASE_DIR = 'user_files'
 STICKER_DIR = 'stickers'
-ADMIN_ID = 1663567950  # Admin Telegram ID
+ADMIN_ID = 1663567950
 
-# --- Foydalanuvchi papkasi ---
 def get_user_dir(user_id):
     user_dir = os.path.join(BASE_DIR, str(user_id))
     os.makedirs(user_dir, exist_ok=True)
@@ -38,12 +38,20 @@ def handle_files(message):
     user_id = message.from_user.id
     user_dir = get_user_dir(user_id)
 
+    file_name = message.document.file_name
+    save_path = os.path.join(user_dir, file_name)
+
+    # Fayl allaqachon mavjudmi — nomi va kengaytmasi bo‘yicha
+    if os.path.exists(save_path):
+        msg = f"⚠️ Fayl '{file_name}' allaqachon saqlangan."
+        bot.reply_to(message, msg)
+        send_sticker(message.chat.id, 'warning')
+        log_to_admin("Bot ogohlantirdi", message.from_user, msg)
+        return
+
     file_info = bot.get_file(message.document.file_id)
     file_path = file_info.file_path
     downloaded_file = bot.download_file(file_path)
-
-    file_name = message.document.file_name
-    save_path = os.path.join(user_dir, file_name)
 
     with open(save_path, 'wb') as f:
         f.write(downloaded_file)
@@ -57,37 +65,19 @@ def handle_files(message):
     log_to_admin("Foydalanuvchi yubordi", message.from_user, file_name)
     log_to_admin("Bot yubordi", message.from_user, reply_msg)
 
+
 def send_options(chat_id):
     markup = InlineKeyboardMarkup()
     markup.add(
-        InlineKeyboardButton("📤 Yana fayl yuboraman", callback_data="send_file"),
-        InlineKeyboardButton("📦 ZIP nomini kiritaman", callback_data="zip_now"),
-        InlineKeyboardButton("🗑 Tozalash", callback_data="clear_files")
+        InlineKeyboardButton("📦 Tayyor", callback_data="zip_now")
     )
-    bot.send_message(chat_id, "Nima qilamiz?", reply_markup=markup)
+    bot.send_message(chat_id, "Yana fayl yuboring yoki “Tayyor” tugmasini bosing.", reply_markup=markup)
 
-@bot.callback_query_handler(func=lambda call: True)
+@bot.callback_query_handler(func=lambda call: call.data == "zip_now")
 def handle_callback(call):
-    user_id = call.from_user.id
-    user_dir = get_user_dir(user_id)
-
-    if call.data == "send_file":
-        msg = "Yana fayl yuboring 📎"
-        bot.send_message(call.message.chat.id, msg)
-        log_to_admin("Bot yubordi", call.from_user, msg)
-
-    elif call.data == "zip_now":
-        msg = "ZIP fayl nomini yozing:"
-        bot.send_message(call.message.chat.id, msg)
-        log_to_admin("Bot yubordi", call.from_user, msg)
-
-    elif call.data == "clear_files":
-        if os.path.exists(user_dir):
-            shutil.rmtree(user_dir)
-        msg = "Barcha fayllar o‘chirildi."
-        bot.send_message(call.message.chat.id, msg)
-        send_sticker(call.message.chat.id, 'trash')
-        log_to_admin("Bot yubordi", call.from_user, msg)
+    msg = "ZIP fayl nomini yozing:"
+    bot.send_message(call.message.chat.id, msg)
+    log_to_admin("Bot yubordi", call.from_user, msg)
 
 @bot.message_handler(func=lambda message: message.text and not message.text.startswith('/'))
 def handle_zip_name(message):
@@ -108,7 +98,7 @@ def handle_zip_name(message):
                 zipf.write(os.path.join(root, file), arcname=file)
 
     with open(zip_path, 'rb') as f:
-        bot.send_document(message.chat.id, f, caption="📦 ZIP tayyor!")
+        bot.send_document(message.chat.id, f, caption="📦 ZIP tayyor!\n\n😅@Zipla_bot Hayotni Ziplab o't.")
 
     send_sticker(message.chat.id, 'done')
     shutil.rmtree(user_dir)
@@ -121,10 +111,8 @@ def handle_zip_name(message):
 def start_handler(message):
     bot.send_message(message.chat.id, "👋 Salom! Men fayllarni ZIP qilib qaytaraman.")
     send_sticker(message.chat.id, 'start')
-    send_options(message.chat.id)
-
     log_to_admin("Foydalanuvchi yubordi", message.from_user, "/start")
-    log_to_admin("Bot yubordi", message.from_user, "👋 Salom va tugmalar yuborildi")
+    log_to_admin("Bot yubordi", message.from_user, "👋 Salom va tugmalar yuborilmadi")
 
 # --- Run ---
 if __name__ == '__main__':
@@ -132,3 +120,4 @@ if __name__ == '__main__':
     os.makedirs(STICKER_DIR, exist_ok=True)
     print("Bot ishga tushdi...")
     bot.polling()
+
