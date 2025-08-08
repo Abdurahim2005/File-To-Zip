@@ -1,10 +1,13 @@
 import os
 import shutil
 import zipfile
+import threading
+from flask import Flask
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-API_ID =  29517932 # o'zingiznikini yozing
+# ==== BOT CONFIG ====
+API_ID = 29517932
 API_HASH = "572b177f48692c0cbd88664120fb87f4"
 BOT_TOKEN = "7579799414:AAFubjp6EdJySpv8tQHxvkpgO1i3fM45kKg"
 
@@ -38,7 +41,6 @@ def log_to_admin(sender_type, user, text):
 async def handle_files(client, message):
     user_id = message.from_user.id
     user_dir = get_user_dir(user_id)
-
     file_name = message.document.file_name
     save_path = os.path.join(user_dir, file_name)
 
@@ -99,8 +101,21 @@ async def start_handler(client, message):
     log_to_admin("Foydalanuvchi yubordi", message.from_user, "/start")
     log_to_admin("Bot yubordi", message.from_user, "\U0001F44B Salom va tugmalar yuborilmadi")
 
+# == Flask "fake" server to trick Render ==
+def keep_alive():
+    flask_app = Flask('')
+    
+    @flask_app.route('/')
+    def home():
+        return "Bot is running!"
+    
+    port = int(os.environ.get("PORT", 5000))
+    flask_app.run(host='0.0.0.0', port=port)
+
 if __name__ == '__main__':
     os.makedirs(BASE_DIR, exist_ok=True)
     os.makedirs(STICKER_DIR, exist_ok=True)
+    threading.Thread(target=keep_alive).start()
     print("Bot ishga tushdi...")
     app.run()
+    
