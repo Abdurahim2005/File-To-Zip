@@ -2,6 +2,7 @@ import os
 import shutil
 import zipfile
 import threading
+import asyncio
 from flask import Flask
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -31,11 +32,11 @@ def send_sticker(chat_id, name):
     if os.path.exists(path):
         app.send_sticker(chat_id, path)
 
-def log_to_admin(sender_type, user, text):
+async def log_to_admin(sender_type, user, text):
     safe_name = user.first_name.encode('utf-16', 'surrogatepass').decode('utf-16', 'replace')
     safe_text = text.encode('utf-16', 'surrogatepass').decode('utf-16', 'replace')
     log_msg = f"[LOG] {sender_type}\n\U0001F464 {safe_name} (ID: {user.id})\n\U0001F4AC {safe_text}"
-    app.send_message(ADMIN_ID, log_msg)
+    await app.send_message(ADMIN_ID, log_msg)
 
 @app.on_message(filters.document)
 async def handle_files(client, message):
@@ -48,7 +49,7 @@ async def handle_files(client, message):
         msg = f"\u26A0\uFE0F Fayl '{file_name}' allaqachon saqlangan."
         await message.reply(msg)
         send_sticker(message.chat.id, 'warning')
-        log_to_admin("Bot ogohlantirdi", message.from_user, msg)
+        await log_to_admin("Bot ogohlantirdi", message.from_user, msg)
         return
 
     await message.download(file_name=save_path)
@@ -59,13 +60,13 @@ async def handle_files(client, message):
     await message.reply(reply_msg, reply_markup=InlineKeyboardMarkup(
         [[InlineKeyboardButton("\U0001F4E6 Tayyor", callback_data="zip_now")]]))
 
-    log_to_admin("Foydalanuvchi yubordi", message.from_user, file_name)
-    log_to_admin("Bot yubordi", message.from_user, reply_msg)
+    await log_to_admin("Foydalanuvchi yubordi", message.from_user, file_name)
+    await log_to_admin("Bot yubordi", message.from_user, reply_msg)
 
 @app.on_callback_query(filters.create(lambda _, __, query: query.data == "zip_now"))
 async def handle_callback(client, call):
     await call.message.reply("ZIP fayl nomini yozing:")
-    log_to_admin("Bot yubordi", call.from_user, "ZIP fayl nomini yozing:")
+    await log_to_admin("Bot yubordi", call.from_user, "ZIP fayl nomini yozing:")
 
 @app.on_message(filters.text & ~filters.command(["start"]))
 async def handle_zip_name(client, message):
@@ -76,7 +77,7 @@ async def handle_zip_name(client, message):
     if not os.listdir(user_dir):
         msg = "Siz hech qanday fayl yubormagansiz."
         await message.reply(msg)
-        log_to_admin("Bot yubordi", message.from_user, msg)
+        await log_to_admin("Bot yubordi", message.from_user, msg)
         return
 
     zip_path = os.path.join(BASE_DIR, f"{zip_name}.zip")
@@ -91,24 +92,24 @@ async def handle_zip_name(client, message):
     shutil.rmtree(user_dir)
     os.remove(zip_path)
 
-    log_to_admin("Foydalanuvchi yubordi", message.from_user, message.text)
-    log_to_admin("Bot yubordi", message.from_user, f"ZIP fayl '{zip_name}.zip' yuborildi")
+    await log_to_admin("Foydalanuvchi yubordi", message.from_user, message.text)
+    await log_to_admin("Bot yubordi", message.from_user, f"ZIP fayl '{zip_name}.zip' yuborildi")
 
 @app.on_message(filters.command("start"))
 async def start_handler(client, message):
     await message.reply("\U0001F44B Salom! Men fayllarni ZIP qilib qaytaraman.")
     send_sticker(message.chat.id, 'start')
-    log_to_admin("Foydalanuvchi yubordi", message.from_user, "/start")
-    log_to_admin("Bot yubordi", message.from_user, "\U0001F44B Salom va tugmalar yuborilmadi")
+    await log_to_admin("Foydalanuvchi yubordi", message.from_user, "/start")
+    await log_to_admin("Bot yubordi", message.from_user, "\U0001F44B Salom va tugmalar yuborilmadi")
 
 # == Flask "fake" server to trick Render ==
 def keep_alive():
     flask_app = Flask('')
-    
+
     @flask_app.route('/')
     def home():
         return "Bot is running!"
-    
+
     port = int(os.environ.get("PORT", 5000))
     flask_app.run(host='0.0.0.0', port=port)
 
