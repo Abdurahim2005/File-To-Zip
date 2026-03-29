@@ -25,16 +25,15 @@ DB_PATH     = "/app/data/bot.db"
 app = Client("zip_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 # ============================================================
-#  IN-MEMORY STATE
+#  IN-MEMORY STATE  (faqat broadcast uchun)
 # ============================================================
-waiting_for_zip_name : set = set()
-broadcast_mode       : set = set()
+broadcast_mode : set = set()   # waiting_for_zip_name endi DB da (set_waiting/is_waiting)
 
 # ============================================================
 #  DATABASE
 # ============================================================
 def init_db():
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)  # FIX 2: /app/data/ papka yaratish
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
@@ -44,10 +43,33 @@ def init_db():
                 last_name   TEXT    DEFAULT '',
                 username    TEXT    DEFAULT '',
                 language    TEXT    DEFAULT 'uz',
+                waiting_zip INTEGER DEFAULT 0,   -- FIX: in-memory o'rniga DB da saqlash
                 joined_at   TEXT    NOT NULL
             )
         """)
+        # Eski DB bo'lsa ustunni qo'shib qo'y (xato bermaydi)
+        try:
+            conn.execute("ALTER TABLE users ADD COLUMN waiting_zip INTEGER DEFAULT 0")
+        except Exception:
+            pass
         conn.commit()
+
+
+def set_waiting(user_id: int, val: bool):
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "UPDATE users SET waiting_zip=? WHERE telegram_id=?",
+            (1 if val else 0, user_id)
+        )
+        conn.commit()
+
+
+def is_waiting(user_id: int) -> bool:
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT waiting_zip FROM users WHERE telegram_id=?", (user_id,)
+        ).fetchone()
+    return bool(row[0]) if row else False
 
 
 def upsert_user(user, lang: str | None = None):
@@ -388,7 +410,7 @@ async def cb_zip_now(client, call):
         await call.answer()
         return
 
-    waiting_for_zip_name.add(uid)
+    set_waiting(uid, True)   # DB ga yoz
     await call.message.reply(tx(uid, "ask_zip_name"))
     await call.answer()
 
@@ -403,18 +425,14 @@ ZIP_NAME_RE = re.compile(r'^[\w\-]{1,64}$')
 async def on_text(client, message):
     uid = message.from_user.id
 
-    # Tilni tanlamagan foydalanuvchi — til tanlashni ko'rsat
+    # Tilni tanlamagan — FAQAT bir marta javob ber, loop bo'lmasin
     if get_lang(uid) is None:
-        await message.reply(
-            TEXTS["uz"]["choose_lang"],
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("🇺🇿 O'zbek",  callback_data="setlang_uz"),
-                InlineKeyboardButton("🇬🇧 English", callback_data="setlang_en"),
-            ]])
-        )
+        # Foydalanuvchini default til bilan qo'shib, /start ni chaqir
+        upsert_user(message.from_user, "uz")
+        await show_welcome(client, message.chat.id, message.from_user)
         return
 
-    # Admin broadcast rejimi
+    # Admin broadcast
     if uid == ADMIN_ID and uid in broadcast_mode:
         broadcast_mode.discard(uid)
         users = all_users()
@@ -430,8 +448,8 @@ async def on_text(client, message):
         )
         return
 
-    # ZIP nomi kutilmayapti — e'tiborsiz qoldur
-    if uid not in waiting_for_zip_name:
+    # ZIP nomi kutilmayapti — jim qayt
+    if not is_waiting(uid):   # FIX: DB dan tekshir
         return
 
     # ============================================================
@@ -442,10 +460,10 @@ async def on_text(client, message):
     # Nom validatsiyasi
     if not ZIP_NAME_RE.match(zip_name_raw):
         await message.reply(tx(uid, "bad_name"))
-        return  # waiting_for_zip_name da qoladi → qaytadan nom so'raydi
+        return  # waiting holati saqlanadi — qaytadan nom kutadi
 
-    # Nomni to'g'ri qabul qildik
-    waiting_for_zip_name.discard(uid)
+    # Nomni qabul qildik — waiting holatini o'chir
+    set_waiting(uid, False)   # FIX: DB dan o'chir
 
     udir     = user_dir(uid)
     zip_name = f"{zip_name_raw}.zip"
