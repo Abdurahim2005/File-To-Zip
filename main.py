@@ -1,38 +1,40 @@
 import os
+import re
 import shutil
 import zipfile
 import threading
 import sqlite3
 from datetime import datetime
 from flask import Flask
-from pyrogram import Client, filters
+from pyrogram import Client, filters, enums          # FIX 1: enums import
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # ============================================================
-#  CONFIG  (muhim kalitlarni .env dan o'qish tavsiya etiladi)
+#  CONFIG
 # ============================================================
 API_ID    = int(os.environ.get("API_ID",    29517932))
 API_HASH  = os.environ.get("API_HASH",  "572b177f48692c0cbd88664120fb87f4")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "7579799414:AAFubjp6EdJySpv8tQHxvkpgO1i3fM45kKg")
 
-BASE_DIR         = "user_files"
-STICKER_DIR      = "stickers"
-ADMIN_ID         = 1663567950
-MAX_STORAGE      = 200 * 1024 * 1024   # 200 MB per user
-DB_PATH          = "/app/data/bot.db"
+BASE_DIR    = "user_files"
+STICKER_DIR = "stickers"
+ADMIN_ID    = 1663567950
+MAX_STORAGE = 200 * 1024 * 1024   # 200 MB per user
+DB_PATH     = "/app/data/bot.db"
 
 app = Client("zip_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 # ============================================================
 #  IN-MEMORY STATE
 # ============================================================
-waiting_for_zip_name : set = set()   # user_id — ZIP nomi kutilmoqda
-broadcast_mode       : set = set()   # admin broadcast rejimi
+waiting_for_zip_name : set = set()
+broadcast_mode       : set = set()
 
 # ============================================================
 #  DATABASE
 # ============================================================
 def init_db():
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)  # FIX 2: /app/data/ papka yaratish
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
@@ -49,7 +51,6 @@ def init_db():
 
 
 def upsert_user(user, lang: str | None = None):
-    """Yangi foydalanuvchini qo'shadi yoki mavjudini yangilaydi."""
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("""
             INSERT INTO users (telegram_id, first_name, last_name, username, language, joined_at)
@@ -114,15 +115,15 @@ TEXTS = {
             "Avval ZIP qilib oling, keyin yangi fayl yuboring."
         ),
         "ready_btn"     : "📦 Tayyor — ZIP yasash",
-        "ask_zip_name"  : "✏️ ZIP fayl nomini yozing:",
+        "ask_zip_name"  : "✏️ ZIP fayl nomini yozing (faqat harf, raqam, — _ belgilari):",
         "zip_caption"   : "📦 ZIP tayyor!\n\n😄 @Zipla_bot — Hayotni Ziplab o't!",
         "no_files"      : "⚠️ Hech qanday fayl yo'q. Avval fayl yuboring.",
         "zip_error"     : "❌ ZIP yaratishda xato yuz berdi. Qaytadan urining.",
         "bad_name"      : "❌ Noto'g'ri nom. Faqat harf, raqam, — _ belgilari:",
-        "not_waiting"   : "📎 Fayl yuboring yoki /start bosing.",
         "lang_set"      : "✅ Til saqlandi!",
         "change_lang"   : "🌐 Tilni o'zgartirish",
         "download_err"  : "❌ Faylni yuklashda xato. Qaytadan yuboring.",
+        "creating_zip"  : "⏳ ZIP yaratilmoqda...",
     },
     "en": {
         "choose_lang"   : "🌐 Tilni tanlang / Choose language:",
@@ -144,15 +145,15 @@ TEXTS = {
             "Create a ZIP first, then send new files."
         ),
         "ready_btn"     : "📦 Ready — Create ZIP",
-        "ask_zip_name"  : "✏️ Enter ZIP file name:",
+        "ask_zip_name"  : "✏️ Enter ZIP file name (letters, numbers, — _ only):",
         "zip_caption"   : "📦 ZIP is ready!\n\n😄 @Zipla_bot — Zip your life!",
         "no_files"      : "⚠️ No files found. Please send files first.",
         "zip_error"     : "❌ Error creating ZIP. Please try again.",
         "bad_name"      : "❌ Invalid name. Use only letters, numbers, — _ characters:",
-        "not_waiting"   : "📎 Send a file or press /start.",
         "lang_set"      : "✅ Language saved!",
         "change_lang"   : "🌐 Change language",
         "download_err"  : "❌ Download error. Please resend the file.",
+        "creating_zip"  : "⏳ Creating ZIP...",
     },
 }
 
@@ -181,7 +182,8 @@ def storage_used(user_id: int) -> int:
 
 
 def file_count(user_id: int) -> int:
-    return len(os.listdir(user_dir(user_id)))
+    d = user_dir(user_id)
+    return len([f for f in os.listdir(d) if os.path.isfile(os.path.join(d, f))])
 
 
 def fmt_size(b: int) -> str:
@@ -191,10 +193,6 @@ def fmt_size(b: int) -> str:
 
 
 def unique_path(directory: str, filename: str) -> str:
-    """
-    Bir xil nomdagi fayl bo'lsa vaqt qo'shimchasi bilan saqlaydi.
-    Masalan: report.pdf → report_143025.pdf
-    """
     full = os.path.join(directory, filename)
     if not os.path.exists(full):
         return full
@@ -223,7 +221,7 @@ async def log_admin(label: str, user, text: str):
         print(f"[log_admin error] {e}")
 
 # ============================================================
-#  CORE: fayl qabul qilish (barcha tur uchun umumiy)
+#  CORE: fayl qabul qilish
 # ============================================================
 async def receive_file(client, message, obj, filename: str):
     uid   = message.from_user.id
@@ -267,13 +265,12 @@ async def cmd_start(client, message):
     uid  = message.from_user.id
     lang = get_lang(uid)
 
-    # ✅ QO'SHILDI: foydalanuvchini bazaga yoz (lang=None bo'lsa ham)
     if lang is None:
-        upsert_user(message.from_user, "uz")  # default til bilan saqlaydi
-
-    lang = get_lang(uid)  # qayta o'qi
+        upsert_user(message.from_user, "uz")
+        lang = get_lang(uid)
 
     if lang is None:
+        # DB muammo bo'lsa — til tanlash ko'rsat
         await message.reply(
             TEXTS["uz"]["choose_lang"],
             reply_markup=InlineKeyboardMarkup([[
@@ -305,7 +302,7 @@ async def show_welcome(client, chat_id: int, user):
 # ============================================================
 @app.on_callback_query(filters.create(lambda _, __, q: q.data.startswith("setlang_")))
 async def cb_set_lang(client, call):
-    lang = call.data.split("_")[1]          # "uz" yoki "en"
+    lang = call.data.split("_")[1]   # "uz" yoki "en"
     upsert_user(call.from_user, lang)
     try:
         await call.message.delete()
@@ -327,7 +324,7 @@ async def cb_change_lang(client, call):
     await call.answer()
 
 # ============================================================
-#  FAYL HANDLERLARI  (barcha media turi)
+#  FAYL HANDLERLARI
 # ============================================================
 @app.on_message(filters.document)
 async def on_document(client, message):
@@ -385,7 +382,8 @@ async def cb_zip_now(client, call):
     uid  = call.from_user.id
     udir = user_dir(uid)
 
-    if not os.listdir(udir):
+    files = [f for f in os.listdir(udir) if os.path.isfile(os.path.join(udir, f))]
+    if not files:
         await call.message.reply(tx(uid, "no_files"))
         await call.answer()
         return
@@ -397,11 +395,15 @@ async def cb_zip_now(client, call):
 # ============================================================
 #  Matn handleri — ZIP nomi yoki broadcast
 # ============================================================
+# Ruxsat etilgan belgilar: harf, raqam, _ va - ; max 64 ta
+ZIP_NAME_RE = re.compile(r'^[\w\-]{1,64}$')
+
+
 @app.on_message(filters.text & ~filters.command(["start", "admin"]))
 async def on_text(client, message):
     uid = message.from_user.id
 
-    # ✅ QO'SHILDI: tilni tanlamagan bo'lsa — xabar yuborma, til tanlashni ko'rsat
+    # Tilni tanlamagan foydalanuvchi — til tanlashni ko'rsat
     if get_lang(uid) is None:
         await message.reply(
             TEXTS["uz"]["choose_lang"],
@@ -412,7 +414,7 @@ async def on_text(client, message):
         )
         return
 
-    # --- Admin broadcast rejimi ---
+    # Admin broadcast rejimi
     if uid == ADMIN_ID and uid in broadcast_mode:
         broadcast_mode.discard(uid)
         users = all_users()
@@ -428,12 +430,66 @@ async def on_text(client, message):
         )
         return
 
-    # --- ZIP nomi ---
+    # ZIP nomi kutilmayapti — e'tiborsiz qoldur
     if uid not in waiting_for_zip_name:
-        # ✅ O'ZGARTIRILDI: log yozma, shunchaki e'tiborsiz qoldur
-        return   # ← avval "not_waiting" xabari yuborardi, endi hech narsa
+        return
 
-    # ... qolgan kod o'zgarmaydi
+    # ============================================================
+    #  FIX 3: ZIP YARATISH KODI (avval yo'q edi!)
+    # ============================================================
+    zip_name_raw = message.text.strip()
+
+    # Nom validatsiyasi
+    if not ZIP_NAME_RE.match(zip_name_raw):
+        await message.reply(tx(uid, "bad_name"))
+        return  # waiting_for_zip_name da qoladi → qaytadan nom so'raydi
+
+    # Nomni to'g'ri qabul qildik
+    waiting_for_zip_name.discard(uid)
+
+    udir     = user_dir(uid)
+    zip_name = f"{zip_name_raw}.zip"
+    zip_path = os.path.join(udir, zip_name)
+
+    # Jarayon xabari
+    progress_msg = await message.reply(tx(uid, "creating_zip"))
+
+    try:
+        # ZIP arxiv yaratish
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for fname in os.listdir(udir):
+                fpath = os.path.join(udir, fname)
+                if os.path.isfile(fpath) and fname != zip_name:
+                    zf.write(fpath, arcname=fname)
+
+        # ZIP ni foydalanuvchiga yuborish
+        await client.send_document(
+            message.chat.id,
+            zip_path,
+            caption=tx(uid, "zip_caption"),
+            file_name=zip_name,
+        )
+
+        await log_admin("📦 ZIP yaratildi", message.from_user, zip_name)
+
+    except Exception as e:
+        await message.reply(tx(uid, "zip_error"))
+        print(f"[zip error] {e}")
+        return
+
+    finally:
+        # Progress xabarni o'chirish
+        try:
+            await progress_msg.delete()
+        except Exception:
+            pass
+
+    # Foydalanuvchi papkasini tozalash (ZIP yuborilgandan keyin)
+    try:
+        shutil.rmtree(udir)
+        os.makedirs(udir, exist_ok=True)
+    except Exception as e:
+        print(f"[cleanup error] {e}")
 
 # ============================================================
 #  ADMIN PANEL
@@ -448,7 +504,7 @@ async def cmd_admin(client, message):
             [InlineKeyboardButton("📊 Statistika",               callback_data="adm_stats")],
             [InlineKeyboardButton("📨 Broadcast (xabar yuborish)", callback_data="adm_broadcast")],
         ]),
-        parse_mode="markdown"
+        parse_mode=enums.ParseMode.MARKDOWN,  # FIX 1: to'g'ri parse_mode
     )
 
 
@@ -475,24 +531,23 @@ async def adm_users(client, call):
     if len(users) > 30:
         lines.append(f"\n… va yana **{len(users) - 30}** ta foydalanuvchi")
 
-    # Telegram xabar uzunligi limitiga qarshi bo'lish uchun bo'lib yuborish
     text = "\n".join(lines)
     if len(text) > 4000:
         for chunk in [text[i:i+4000] for i in range(0, len(text), 4000)]:
-            await call.message.reply(chunk, parse_mode="markdown")
+            await call.message.reply(chunk, parse_mode=enums.ParseMode.MARKDOWN)
     else:
-        await call.message.reply(text, parse_mode="markdown")
+        await call.message.reply(text, parse_mode=enums.ParseMode.MARKDOWN)
 
     await call.answer()
 
 
 @app.on_callback_query(admin_filter & filters.create(lambda _, __, q: q.data == "adm_stats"))
 async def adm_stats(client, call):
-    users  = all_users()
-    total  = len(users)
-    uz_cnt = sum(1 for u in users if u[4] == "uz")
-    en_cnt = sum(1 for u in users if u[4] == "en")
-    today  = datetime.now().strftime("%Y-%m-%d")
+    users     = all_users()
+    total     = len(users)
+    uz_cnt    = sum(1 for u in users if u[4] == "uz")
+    en_cnt    = sum(1 for u in users if u[4] == "en")
+    today     = datetime.now().strftime("%Y-%m-%d")
     today_cnt = sum(1 for u in users if (u[5] or "").startswith(today))
 
     await call.message.reply(
@@ -501,7 +556,7 @@ async def adm_stats(client, call):
         f"📅 Bugun qo'shilganlar   : **{today_cnt}**\n"
         f"🇺🇿 O'zbek tili           : **{uz_cnt}**\n"
         f"🇬🇧 Ingliz tili           : **{en_cnt}**",
-        parse_mode="markdown"
+        parse_mode=enums.ParseMode.MARKDOWN,
     )
     await call.answer()
 
@@ -512,12 +567,12 @@ async def adm_broadcast(client, call):
     await call.message.reply(
         "📨 Barcha foydalanuvchilarga yuboriladigan xabarni yozing:\n"
         "_(Bekor qilish uchun /admin bosing)_",
-        parse_mode="markdown"
+        parse_mode=enums.ParseMode.MARKDOWN,
     )
     await call.answer()
 
 # ============================================================
-#  FLASK — Render.com uchun "keep-alive"
+#  FLASK — Railway/Render uchun keep-alive
 # ============================================================
 def keep_alive():
     flask_app = Flask(__name__)
@@ -533,6 +588,7 @@ def keep_alive():
 #  MAIN
 # ============================================================
 if __name__ == "__main__":
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)  # FIX 2: papkani oldin yaratish
     init_db()
     os.makedirs(BASE_DIR,    exist_ok=True)
     os.makedirs(STICKER_DIR, exist_ok=True)
