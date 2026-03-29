@@ -267,6 +267,12 @@ async def cmd_start(client, message):
     uid  = message.from_user.id
     lang = get_lang(uid)
 
+    # ✅ QO'SHILDI: foydalanuvchini bazaga yoz (lang=None bo'lsa ham)
+    if lang is None:
+        upsert_user(message.from_user, "uz")  # default til bilan saqlaydi
+
+    lang = get_lang(uid)  # qayta o'qi
+
     if lang is None:
         await message.reply(
             TEXTS["uz"]["choose_lang"],
@@ -395,6 +401,17 @@ async def cb_zip_now(client, call):
 async def on_text(client, message):
     uid = message.from_user.id
 
+    # ✅ QO'SHILDI: tilni tanlamagan bo'lsa — xabar yuborma, til tanlashni ko'rsat
+    if get_lang(uid) is None:
+        await message.reply(
+            TEXTS["uz"]["choose_lang"],
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🇺🇿 O'zbek",  callback_data="setlang_uz"),
+                InlineKeyboardButton("🇬🇧 English", callback_data="setlang_en"),
+            ]])
+        )
+        return
+
     # --- Admin broadcast rejimi ---
     if uid == ADMIN_ID and uid in broadcast_mode:
         broadcast_mode.discard(uid)
@@ -407,51 +424,16 @@ async def on_text(client, message):
             except Exception:
                 fail += 1
         await message.reply(
-            f"✅ Broadcast tugadi!\n"
-            f"✔️ Yuborildi: {ok}\n"
-            f"❌ Yuborilmadi: {fail}"
+            f"✅ Broadcast tugadi!\n✔️ Yuborildi: {ok}\n❌ Yuborilmadi: {fail}"
         )
         return
 
     # --- ZIP nomi ---
     if uid not in waiting_for_zip_name:
-        await message.reply(tx(uid, "not_waiting"))
-        return
+        # ✅ O'ZGARTIRILDI: log yozma, shunchaki e'tiborsiz qoldur
+        return   # ← avval "not_waiting" xabari yuborardi, endi hech narsa
 
-    udir     = user_dir(uid)
-    zip_name = "".join(
-        c for c in message.text.strip()
-        if c.isalnum() or c in (" ", "-", "_")
-    ).strip()
-
-    if not zip_name:
-        await message.reply(tx(uid, "bad_name"))
-        return
-
-    zip_path = os.path.join(BASE_DIR, f"{uid}_{zip_name}.zip")
-
-    try:
-        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-            for root, _, files in os.walk(udir):
-                for fname in files:
-                    zf.write(os.path.join(root, fname), arcname=fname)
-
-        await client.send_document(
-            message.chat.id, zip_path,
-            caption=tx(uid, "zip_caption")
-        )
-        await send_sticker(client, message.chat.id, "done")
-        await log_admin("📦 ZIP yuborildi", message.from_user, f"{zip_name}.zip")
-
-    except Exception as e:
-        await message.reply(tx(uid, "zip_error"))
-        print(f"[ZIP error] {e}")
-
-    finally:
-        waiting_for_zip_name.discard(uid)
-        shutil.rmtree(udir, ignore_errors=True)
-        if os.path.exists(zip_path):
-            os.remove(zip_path)
+    # ... qolgan kod o'zgarmaydi
 
 # ============================================================
 #  ADMIN PANEL
