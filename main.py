@@ -137,7 +137,7 @@ TEXTS = {
             "Avval ZIP qilib oling, keyin yangi fayl yuboring."
         ),
         "ready_btn"     : "📦 Tayyor — ZIP yasash",
-        "ask_zip_name"  : "✏️ ZIP fayl nomini yozing (faqat harf, raqam, — _ belgilari):",
+        "ask_zip_name"  : "✏️ ZIP fayl nomini yozing (faqat harf, raqam, — _ belgilari,orasida bo'sh joy qolmasin!,ali zip emas, \n ali_zip,yoki alizip,ali-zip shu misolda fayl nomini kiriting!:",
         "zip_caption"   : "📦 ZIP tayyor!\n\n😄 @Zipla_bot — Hayotni Ziplab o't!",
         "no_files"      : "⚠️ Hech qanday fayl yo'q. Avval fayl yuboring.",
         "zip_error"     : "❌ ZIP yaratishda xato yuz berdi. Qaytadan urining.",
@@ -171,7 +171,7 @@ TEXTS = {
         "zip_caption"   : "📦 ZIP is ready!\n\n😄 @Zipla_bot — Zip your life!",
         "no_files"      : "⚠️ No files found. Please send files first.",
         "zip_error"     : "❌ Error creating ZIP. Please try again.",
-        "bad_name"      : "❌ Invalid name. Use only letters, numbers, — _ characters:",
+        "bad_name"      : "Use no spaces. Only letters, numbers, _ and -. \n ❌ Wrong: ali zip \n ✅ Correct: ali_zip",
         "lang_set"      : "✅ Language saved!",
         "change_lang"   : "🌐 Change language",
         "download_err"  : "❌ Download error. Please resend the file.",
