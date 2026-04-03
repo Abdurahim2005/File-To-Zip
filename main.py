@@ -603,18 +603,20 @@ async def on_text(client, message):
                 await message.reply(f"❌ ID `{target_id}` topilmadi.", parse_mode=enums.ParseMode.MARKDOWN)
                 return
             tid, fn, ln, un, lg, jd, banned = user_data
-            used  = storage_used(tid)
-            fcnt  = file_count(tid)
+            used       = storage_used(tid)
+            fcnt       = file_count(tid)
+            ban_status = "Ha" if banned else "Yoq"
+            username   = ("@" + un) if un else "—"
             await message.reply(
                 f"👤 **Foydalanuvchi ma'lumoti**\n\n"
                 f"🆔 ID: `{tid}`\n"
                 f"📛 Ism: {fn} {ln}\n"
-                f"🔗 Username: {'@' + un if un else '—'}\n"
+                f"🔗 Username: {username}\n"
                 f"🌐 Til: {lg.upper()}\n"
                 f"📅 Qo'shilgan: {jd[:16]}\n"
                 f"📁 Fayllar: {fcnt} ta\n"
                 f"💾 Disk: {fmt_size(used)}\n"
-                f"🚫 Bloklangan: {'Ha' if banned else 'Yo'q'}",
+                f"🚫 Bloklangan: {ban_status}",
                 parse_mode=enums.ParseMode.MARKDOWN,
             )
 
