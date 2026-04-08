@@ -239,7 +239,7 @@ TEXTS = {
             "• Bo'sh joy ham bo'lsa — `_` ga aylantiriladi\n\n"
             "📌 Misol: `mening_fayllar` yoki `mening fayllar`"
         ),
-        "zip_caption":   "📦 *ZIP tayyor!*\n\n🤖 @Zipla\\_bot — Hayotni Ziplab o't!",
+        "zip_caption":   "📦 *ZIP tayyor!*\n\n🤖 @Zipla_bot — Hayotni Ziplab o't!",
         "no_files":      "⚠️ *Fayl topilmadi.* Avval fayl yuboring.",
         "zip_error":     "❌ *ZIP yaratishda xato.* Qaytadan urining.",
         "bad_name":      "❌ *Noto'g'ri nom!*\n\nFaqat harf, raqam, bo'sh joy, `-` va `_` ishlating.\n\n📌 Misol: `mening fayllar`",
