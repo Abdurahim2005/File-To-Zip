@@ -297,7 +297,7 @@ TEXTS = {
             "• Spaces are allowed — auto-converted to `_`\n\n"
             "📌 Example: `my_files` or `my files`"
         ),
-        "zip_caption":   "📦 *ZIP is ready!*\n\n🤖 @Zipla\\_bot — Zip your life!",
+        "zip_caption":   "📦 *ZIP is ready!*\n\n🤖 @Zipla_bot — Zip your life!",
         "no_files":      "⚠️ *No files found.* Please send files first.",
         "zip_error":     "❌ *ZIP creation failed.* Please try again.",
         "bad_name":      "❌ *Invalid name!*\n\nUse letters, numbers, spaces, `-` and `_` only.\n\n📌 Example: `my files`",
