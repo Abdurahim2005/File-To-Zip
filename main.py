@@ -67,6 +67,18 @@ def init_db():
                 joined_at   TEXT    NOT NULL
             )
         """)
+        # Fayllar jadvali — file_id saqlanadi, ZIP vaqtida yuklanadi
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS user_files (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                telegram_id INTEGER NOT NULL,
+                file_id     TEXT    NOT NULL,
+                file_type   TEXT    NOT NULL,
+                filename    TEXT    NOT NULL,
+                file_size   INTEGER DEFAULT 0,
+                added_at    TEXT    NOT NULL
+            )
+        """)
         for col, dfn in [("waiting_zip","INTEGER DEFAULT 0"),("is_banned","INTEGER DEFAULT 0")]:
             try:
                 conn.execute(f"ALTER TABLE users ADD COLUMN {col} {dfn}")
@@ -74,6 +86,56 @@ def init_db():
                 pass
         conn.commit()
     print(f"[DB] tayyor: {DB_PATH}")
+
+
+# ── File record funksiyalari ─────────────────────────────
+def add_file_record(uid: int, file_id: str, file_type: str,
+                    filename: str, file_size: int):
+    with sqlite3.connect(DB_PATH) as c:
+        c.execute(
+            "INSERT INTO user_files(telegram_id,file_id,file_type,filename,file_size,added_at)"
+            " VALUES(?,?,?,?,?,?)",
+            (uid, file_id, file_type, filename, file_size,
+             datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        )
+        c.commit()
+
+def get_user_files(uid: int) -> list:
+    """[(id, file_id, file_type, filename, file_size), ...]"""
+    with sqlite3.connect(DB_PATH) as c:
+        return c.execute(
+            "SELECT id,file_id,file_type,filename,file_size "
+            "FROM user_files WHERE telegram_id=? ORDER BY id",
+            (uid,)
+        ).fetchall()
+
+def clear_user_files(uid: int):
+    with sqlite3.connect(DB_PATH) as c:
+        c.execute("DELETE FROM user_files WHERE telegram_id=?", (uid,))
+        c.commit()
+
+def user_file_count(uid: int) -> int:
+    with sqlite3.connect(DB_PATH) as c:
+        r = c.execute(
+            "SELECT COUNT(*) FROM user_files WHERE telegram_id=?", (uid,)
+        ).fetchone()
+    return r[0] if r else 0
+
+def user_pending_size(uid: int) -> int:
+    """DB dagi fayllarning umumiy taxminiy hajmi (bytes)"""
+    with sqlite3.connect(DB_PATH) as c:
+        r = c.execute(
+            "SELECT COALESCE(SUM(file_size),0) FROM user_files WHERE telegram_id=?", (uid,)
+        ).fetchone()
+    return r[0] if r else 0
+
+def all_users_pending() -> list:
+    """[(uid, file_count, total_size), ...] — fayllari bor foydalanuvchilar"""
+    with sqlite3.connect(DB_PATH) as c:
+        return c.execute(
+            "SELECT telegram_id, COUNT(*), COALESCE(SUM(file_size),0) "
+            "FROM user_files GROUP BY telegram_id ORDER BY 3 DESC"
+        ).fetchall()
 
 
 def set_waiting(uid: int, val: bool):
@@ -159,11 +221,10 @@ TEXTS = {
             "fayllaringiz *avtomatik* ZIP lanadi.\n\n"
             "💾 Har bir foydalanuvchiga: max *500 MB*"
         ),
-        "receiving":    "📥 *Qabul qilinmoqda...* kutib turing",
+        "receiving":    "📥 *Fayllar qabul qilinmoqda...* kutib turing",
         "files_saved": (
-            "✅ *{count} ta fayl* saqlandi!\n"
-            "💾 Hajmi: *{size}*\n\n"
-            "👇 ZIP yaratishga tayyor bo'lsangiz:"
+            "✅ *{count} ta fayl* qabul qilindi!\n\n"
+            "👇 Hammasi tayyor bo'lsa ZIP yasash tugmasini bosing:"
         ),
         "storage_full": (
             "❌ *Xotira to'lib qoldi!*\n\n"
@@ -218,11 +279,10 @@ TEXTS = {
             "files are *auto-zipped*.\n\n"
             "💾 Storage limit per user: *500 MB*"
         ),
-        "receiving":    "📥 *Receiving...* please wait",
+        "receiving":    "📥 *Receiving files...* please wait",
         "files_saved": (
-            "✅ *{count} file(s)* saved!\n"
-            "💾 Size: *{size}*\n\n"
-            "👇 Ready to create ZIP:"
+            "✅ *{count} file(s)* received!\n\n"
+            "👇 When all files are sent, press Create ZIP:"
         ),
         "storage_full": (
             "❌ *Storage full!*\n\n"
@@ -278,44 +338,23 @@ def user_dir(uid: int) -> str:
     return p
 
 def storage_used(uid: int) -> int:
-    d = user_dir(uid)
-    return sum(
-        os.path.getsize(os.path.join(d, f))
-        for f in os.listdir(d) if os.path.isfile(os.path.join(d, f))
-    )
+    """Foydalanuvchining DB dagi pending fayllar hajmi"""
+    return user_pending_size(uid)
 
 def file_count(uid: int) -> int:
-    d = user_dir(uid)
-    return len([f for f in os.listdir(d) if os.path.isfile(os.path.join(d, f))])
+    """Foydalanuvchining DB dagi pending fayllar soni"""
+    return user_file_count(uid)
 
 def total_storage_all() -> int:
-    total = 0
-    if not os.path.exists(BASE_DIR):
-        return 0
-    for folder in os.listdir(BASE_DIR):
-        fp = os.path.join(BASE_DIR, folder)
-        if os.path.isdir(fp):
-            for f in os.listdir(fp):
-                fpath = os.path.join(fp, f)
-                if os.path.isfile(fpath):
-                    total += os.path.getsize(fpath)
-    return total
+    """Barcha pending fayllarning umumiy taxminiy hajmi"""
+    with sqlite3.connect(DB_PATH) as c:
+        r = c.execute("SELECT COALESCE(SUM(file_size),0) FROM user_files").fetchone()
+    return r[0] if r else 0
 
 def all_users_storage() -> list:
-    """Har bir foydalanuvchi uchun disk hajmi — (uid, used_bytes) tartiblangan"""
-    result = []
-    if not os.path.exists(BASE_DIR):
-        return result
-    for folder in os.listdir(BASE_DIR):
-        try:
-            uid  = int(folder)
-            used = storage_used(uid)
-            if used > 0:
-                result.append((uid, used))
-        except ValueError:
-            pass
-    result.sort(key=lambda x: x[1], reverse=True)
-    return result
+    """(uid, used_bytes) — pending fayllari bo'yicha tartiblangan"""
+    rows = all_users_pending()
+    return [(r[0], r[2]) for r in rows if r[2] > 0]
 
 def fmt_size(b: int) -> str:
     if b < 1024 ** 2:
@@ -368,9 +407,7 @@ async def cancel_auto_zip(uid: int):
 
 async def auto_zip_runner(client, chat_id: int, uid: int):
     await asyncio.sleep(AUTO_ZIP_DELAY)
-    udir  = user_dir(uid)
-    files = [f for f in os.listdir(udir) if os.path.isfile(os.path.join(udir, f))]
-    if not files or is_waiting(uid):
+    if user_file_count(uid) == 0 or is_waiting(uid):
         return
     try:
         await client.send_message(
@@ -394,6 +431,12 @@ def start_auto_zip(client, chat_id: int, uid: int):
 # ════════════════════════════════════════════════════════════
 async def create_and_send_zip(client, chat_id: int, uid: int,
                                zip_name_raw: str, auto: bool = False):
+    file_records = get_user_files(uid)
+    if not file_records:
+        await client.send_message(chat_id, tx(uid, "no_files"),
+                                   parse_mode=enums.ParseMode.MARKDOWN)
+        return
+
     udir     = user_dir(uid)
     zip_name = f"{zip_name_raw}.zip"
     zip_path = os.path.join(udir, zip_name)
@@ -403,12 +446,36 @@ async def create_and_send_zip(client, chat_id: int, uid: int,
         parse_mode=enums.ParseMode.MARKDOWN,
     )
     try:
-        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-            for fname in os.listdir(udir):
-                fpath = os.path.join(udir, fname)
-                if os.path.isfile(fpath) and fname != zip_name:
-                    zf.write(fpath, arcname=fname)
+        # 1) Har bir file_id bo'yicha faylni yuklab olish
+        downloaded = []
+        seen_names = set()
+        for _, file_id, file_type, filename, _ in file_records:
+            # Takrorlanmasin deb noyob nom
+            base, ext = os.path.splitext(filename)
+            uname = filename
+            counter = 1
+            while uname in seen_names:
+                uname = f"{base}_{counter}{ext}"
+                counter += 1
+            seen_names.add(uname)
+            save_path = os.path.join(udir, uname)
+            try:
+                await client.download_media(file_id, file_name=save_path)
+                downloaded.append((save_path, uname))
+            except Exception as e:
+                await error_to_admin(client, f"create_zip → download {file_type}", uid, e)
+                # Yuklab bo'lmagan faylni o'tkazib yuboramiz, davom etamiz
 
+        if not downloaded:
+            raise RuntimeError("Hech bir fayl yuklab olinmadi")
+
+        # 2) ZIP yaratish
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for fpath, arcname in downloaded:
+                if os.path.isfile(fpath):
+                    zf.write(fpath, arcname=arcname)
+
+        # 3) ZIP yuborish
         caption = tx(uid, "zip_caption")
         if auto:
             caption = tx(uid, "auto_zip_done") + "\n\n" + caption
@@ -436,13 +503,14 @@ async def create_and_send_zip(client, chat_id: int, uid: int,
             except Exception:
                 pass
 
-    # Fayllarni tozalash
+    # 4) Tozalash — papka + DB yozuvlari
     try:
         shutil.rmtree(udir)
         os.makedirs(udir, exist_ok=True)
     except Exception as e:
         print(f"[cleanup error] {e}")
 
+    clear_user_files(uid)
     set_waiting(uid, False)
     user_auto_zip.pop(uid, None)
 
@@ -456,67 +524,67 @@ async def receive_file(client, message: Message, obj, filename: str):
         await message.reply(tx(uid, "banned"))
         return
 
-    fsize = getattr(obj, "file_size", 0) or 0
-    udir  = user_dir(uid)
-    used  = storage_used(uid)
-
-    if used + fsize > MAX_STORAGE:
+    # Taxminiy hajm tekshiruvi (file_size metadata'dan)
+    fsize       = getattr(obj, "file_size", 0) or 0
+    pending_now = user_pending_size(uid)
+    if pending_now + fsize > MAX_STORAGE:
         await message.reply(
-            tx(uid, "storage_full", used=fmt_size(used), max=fmt_size(MAX_STORAGE)),
+            tx(uid, "storage_full",
+               used=fmt_size(pending_now), max=fmt_size(MAX_STORAGE)),
             parse_mode=enums.ParseMode.MARKDOWN,
         )
         return
 
-    # Bitta status xabar — yangi bo'lsa yuborish, bor bo'lsa o'zgartirish
-    sm = user_status_msg.get(uid)
-    if sm is None:
-        try:
-            sm = await message.reply(
-                tx(uid, "receiving"),
-                parse_mode=enums.ParseMode.MARKDOWN,
-            )
-            user_status_msg[uid] = sm
-        except Exception:
-            pass
-    # bor bo'lsa — hech narsa qilmaymiz (bitta xabar yetadi)
+    # file_id ni aniqlash — har fayl turida har xil
+    file_id = getattr(obj, "file_id", None)
+    if not file_id:
+        # Rasm uchun eng katta o'lcham
+        if message.photo:
+            file_id = message.photo.file_id
+        else:
+            return
 
-    # Foydalanuvchi xabarini o'chirish (chat toza bo'lishi uchun)
+    # file_type
+    if   message.document:   ftype = "document"
+    elif message.photo:      ftype = "photo"
+    elif message.video:      ftype = "video"
+    elif message.audio:      ftype = "audio"
+    elif message.voice:      ftype = "voice"
+    elif message.video_note: ftype = "video_note"
+    elif message.sticker:    ftype = "sticker"
+    elif message.animation:  ftype = "animation"
+    else:                    ftype = "file"
+
+    # DB ga yoz
+    add_file_record(uid, file_id, ftype, filename, fsize)
+
+    # Foydalanuvchi xabarini o'chirish
     try:
         await message.delete()
     except Exception:
         pass
 
-    # Faylni yuklash
-    save_path = unique_path(udir, filename)
-    try:
-        await client.download_media(message, file_name=save_path)
-    except Exception as e:
-        # Yuklab olmasa foydalanuvchiga xabar + adminga xatolik
+    new_cnt = user_file_count(uid)
+
+    # Bitta status xabar — yangi bo'lsa yuborish, bor bo'lsa yangilash
+    sm = user_status_msg.get(uid)
+    if sm is None:
         try:
-            if sm:
-                await sm.delete()
-                user_status_msg.pop(uid, None)
+            sm = await client.send_message(
+                message.chat.id,
+                tx(uid, "files_saved", count=new_cnt),
+                parse_mode=enums.ParseMode.MARKDOWN,
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton(tx(uid, "ready_btn"), callback_data="zip_now")
+                ]])
+            )
+            user_status_msg[uid] = sm
         except Exception:
             pass
-        await client.send_message(
-            message.chat.id,
-            tx(uid, "download_err"),
-            parse_mode=enums.ParseMode.MARKDOWN,
-        )
-        await error_to_admin(
-            client, "receive_file → download_media",
-            uid, e
-        )
-        return
-
-    new_cnt  = file_count(uid)
-    new_used = storage_used(uid)
-
-    # Status xabarni yangilash
-    if sm:
+    else:
         try:
             await sm.edit_text(
-                tx(uid, "files_saved", count=new_cnt, size=fmt_size(new_used)),
+                tx(uid, "files_saved", count=new_cnt),
                 parse_mode=enums.ParseMode.MARKDOWN,
                 reply_markup=InlineKeyboardMarkup([[
                     InlineKeyboardButton(tx(uid, "ready_btn"), callback_data="zip_now")
@@ -686,10 +754,8 @@ async def on_contact(client, message):
 # ════════════════════════════════════════════════════════════
 @app.on_callback_query(filters.create(lambda _, __, q: q.data == "zip_now"))
 async def cb_zip_now(client, call):
-    uid  = call.from_user.id
-    udir = user_dir(uid)
-    files = [f for f in os.listdir(udir) if os.path.isfile(os.path.join(udir, f))]
-    if not files:
+    uid = call.from_user.id
+    if user_file_count(uid) == 0:
         await call.message.reply(tx(uid, "no_files"), parse_mode=enums.ParseMode.MARKDOWN)
         await call.answer()
         return
@@ -786,8 +852,8 @@ async def on_text(client, message):
                 await message.reply(f"❌ ID `{target_id}` topilmadi.",
                                     parse_mode=enums.ParseMode.MARKDOWN); return
             tid, fn, ln, un, lg, jd, bnnd = data
-            used       = storage_used(tid)
-            fcnt       = file_count(tid)
+            fcnt       = user_file_count(tid)
+            used       = user_pending_size(tid)
             ban_status = "✅ Yoq" if not bnnd else "🚫 Ha"
             uname      = f"@{un}" if un else "—"
             await message.reply(
@@ -797,8 +863,8 @@ async def on_text(client, message):
                 f"🔗 Username: {uname}\n"
                 f"🌍 Til: {lg.upper()}\n"
                 f"📅 Qo'shilgan: {jd[:16]}\n"
-                f"📁 Fayllar: {fcnt} ta\n"
-                f"💾 Disk: {fmt_size(used)}\n"
+                f"📁 Pending fayllar: {fcnt} ta\n"
+                f"💾 Taxminiy hajm: {fmt_size(used)}\n"
                 f"🚫 Bloklangan: {ban_status}",
                 parse_mode=enums.ParseMode.MARKDOWN,
             )
@@ -810,8 +876,9 @@ async def on_text(client, message):
             ud = os.path.join(BASE_DIR, str(target_id))
             if os.path.exists(ud):
                 shutil.rmtree(ud); os.makedirs(ud, exist_ok=True)
+            clear_user_files(target_id)
             await message.reply(
-                f"🗑️ ID `{target_id}` — fayllar tozalandi.",
+                f"🗑️ ID `{target_id}` — fayllar tozalandi (disk + DB).",
                 parse_mode=enums.ParseMode.MARKDOWN,
             )
         return
@@ -926,33 +993,31 @@ async def adm_stats(client, call):
 
 @app.on_callback_query(admin_filter & filters.create(lambda _, __, q: q.data == "adm_disk"))
 async def adm_disk(client, call):
-    """Har bir foydalanuvchi uchun disk hajmi"""
-    rows = all_users_storage()
+    """Har bir foydalanuvchi uchun pending fayllar statistikasi"""
+    rows = all_users_pending()   # [(uid, file_count, total_size), ...]
     if not rows:
-        await call.message.reply("💾 Hozircha diskda hech narsa yo'q.")
+        await call.message.reply("💾 Hozircha hech kimning fayli yo'q.")
         await call.answer(); return
 
-    db_users = {u[0]: (u[1], u[2], u[3]) for u in all_users()}  # {tid: (fn, ln, un)}
-    total    = sum(r[1] for r in rows)
-    lines    = [f"💾 *Disk statistikasi*\nUmumiy: *{fmt_size(total)}*\n"]
-
-    for i, (uid, used) in enumerate(rows[:30], 1):
+    db_users = {u[0]: (u[1], u[2], u[3]) for u in all_users()}
+    total_sz  = sum(r[2] for r in rows)
+    total_cnt = sum(r[1] for r in rows)
+    lines     = [
+        f"💾 *Disk statistikasi* (pending fayllar)\n"
+        f"Jami: *{total_cnt} ta fayl* | *{fmt_size(total_sz)}*\n"
+    ]
+    for i, (uid, fcnt, used) in enumerate(rows[:30], 1):
         info = db_users.get(uid)
-        if info:
-            name = f"{info[0]} {info[1]}".strip() or "—"
-            ustr = f"@{info[2]}" if info[2] else "—"
-        else:
-            name = "Noma'lum"
-            ustr = "—"
-        bar  = "█" * min(int(used / (MAX_STORAGE / 20)), 20)
-        pct  = used / MAX_STORAGE * 100
+        name = f"{info[1]} {info[2]}".strip() if info else "Noma'lum"
+        ustr = f"@{info[3]}" if (info and info[3]) else "—"
+        pct  = used / MAX_STORAGE * 100 if MAX_STORAGE else 0
+        bar  = "█" * min(int(pct / 5), 20)
         lines.append(
             f"`{i}.` {name} ({ustr})\n"
-            f"   🆔 `{uid}` | {fmt_size(used)} ({pct:.1f}%) {bar}"
+            f"   🆔 `{uid}` | {fcnt} fayl | {fmt_size(used)} ({pct:.1f}%) {bar}"
         )
-
     if len(rows) > 30:
-        lines.append(f"\n… va yana *{len(rows)-30}* ta foydalanuvchi")
+        lines.append(f"\n… va yana *{len(rows)-30}* ta")
 
     text = "\n".join(lines)
     for chunk in [text[i:i+4000] for i in range(0, len(text), 4000)]:
