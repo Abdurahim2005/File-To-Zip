@@ -15,7 +15,7 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
 # ════════════════════════════════════════════════════════════
 API_ID    = int(os.environ.get("API_ID",    29517932))
 API_HASH  = os.environ.get("API_HASH",  "572b177f48692c0cbd88664120fb87f4")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "7579799414:AAFubjp6EdJySpv8tQHxvkpgO1i3fM45kKg")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "7579799414:AAGDyXOzKEWKtk4D4N6Vsi3X5qngmPr0uiE")
 
 BASE_DIR        = "user_files"
 STICKER_DIR     = "stickers"
