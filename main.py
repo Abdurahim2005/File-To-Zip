@@ -259,7 +259,7 @@ TEXTS = {
             "• Bo'sh joy ham bo'lsa — `_` ga aylantiriladi\n\n"
             "📌 Misol: `mening_fayllar` yoki `mening fayllar`"
         ),
-        "zip_caption":   "📦 *ZIP tayyor!*\n\n🤖 @Zipla\\_bot — Hayotni Ziplab o't!",
+        "zip_caption":   "📦 *ZIP tayyor!*\n\n🤖 @Zipla_bot — Hayotni Ziplab o't!",
         "no_files":      "⚠️ Avval fayl yuboring.",
         "zip_error":     "❌ ZIP yaratishda xato. Qaytadan urining.",
         "bad_name":      "❌ *Noto'g'ri nom!* Harf, raqam, bo'sh joy, `-` va `_` ishlating.",
@@ -301,7 +301,7 @@ TEXTS = {
             "• Spaces allowed — auto-converted to `_`\n\n"
             "📌 Example: `my_files` or `my files`"
         ),
-        "zip_caption":   "📦 *ZIP is ready!*\n\n🤖 @Zipla\\_bot — Zip your life!",
+        "zip_caption":   "📦 *ZIP is ready!*\n\n🤖 @Zipla_bot — Zip your life!",
         "no_files":      "⚠️ Please send files first.",
         "zip_error":     "❌ ZIP creation failed. Please try again.",
         "bad_name":      "❌ *Invalid name!* Use letters, numbers, spaces, `-` and `_`.",
@@ -396,18 +396,27 @@ def schedule_task(task_dict: dict, uid: int, coro):
 # ════════════════════════════════════════════════════════════
 #  PARALLEL DOWNLOAD (ZIP tugmasi bosilganda boshladi)
 # ════════════════════════════════════════════════════════════
+async def _download_one(client, file_id: str, save_path: str) -> tuple:
+    """Bitta faylni yuklab olish — (file_id, save_path, ok)"""
+    try:
+        await client.download_media(file_id, file_name=save_path)
+        return (file_id, save_path, True)
+    except Exception as e:
+        return (file_id, save_path, False)
+
+
 async def predownload_files(client, uid: int) -> dict:
     """
-    file_id → local_path mapping.
-    ZIP tugmasi bosilgandan keyin fon da ishlaydi,
-    foydalanuvchi nom yozayotganda yuklab turamiz.
+    Barcha fayllarni PARALLEL yuklab olish.
+    Qaytaradi: {file_id: (local_path, arcname)}
     """
     file_records = get_user_files(uid)
     udir         = user_dir(uid)
-    result       = {}   # file_id → (local_path, arcname)
-    seen_names   = set()
+    seen_names   : set  = set()
+    tasks        : list = []
+    file_id_map  : dict = {}   # save_path → (file_id, arcname)
 
-    for _, file_id, file_type, filename, _ in file_records:
+    for _, file_id, _, filename, _ in file_records:
         base, ext = os.path.splitext(filename)
         arcname   = filename
         counter   = 1
@@ -416,13 +425,20 @@ async def predownload_files(client, uid: int) -> dict:
             counter += 1
         seen_names.add(arcname)
         save_path = os.path.join(udir, arcname)
-        try:
-            await client.download_media(file_id, file_name=save_path)
-            result[file_id] = (save_path, arcname)
-        except Exception as e:
-            await error_to_admin(client, f"predownload {file_type}", uid, e)
+        file_id_map[save_path] = (file_id, arcname)
+        tasks.append(_download_one(client, file_id, save_path))
 
-    return result
+    # Barchasi bir vaqtda parallel
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    output: dict = {}
+    for res in results:
+        if isinstance(res, tuple) and res[2]:   # ok=True
+            fid, spath, _ = res
+            _, arcname    = file_id_map[spath]
+            output[fid]   = (spath, arcname)
+
+    return output
 
 # ════════════════════════════════════════════════════════════
 #  AUTO-ZIP TIMERS
@@ -502,55 +518,37 @@ async def create_and_send_zip(client, chat_id: int, uid: int,
         parse_mode=enums.ParseMode.MARKDOWN,
     )
     try:
-        # ① Oldindan yuklangan fayllarni tekshir
+        # ① Preload task ni kutish yoki parallel yuklab olish
         preloaded: dict = {}
         dl_task = user_download_task.get(uid)
-        if dl_task and not dl_task.done():
+        if dl_task is not None and not dl_task.done():
+            # ZIP tugmasi bosib boshlangan parallel yuklov hali tugamagan — kutamiz
             try:
-                preloaded = await asyncio.wait_for(asyncio.shield(dl_task), timeout=60)
+                preloaded = await asyncio.wait_for(
+                    asyncio.shield(dl_task), timeout=120
+                )
             except Exception:
                 preloaded = {}
-        elif dl_task and dl_task.done():
+        elif dl_task is not None and dl_task.done():
             try:
-                preloaded = dl_task.result()
+                preloaded = dl_task.result() or {}
             except Exception:
                 preloaded = {}
 
-        # ② Yuklanmagan fayllarni yuklab olish
-        downloaded = []
-        seen_names = set()
-        for _, file_id, file_type, filename, _ in file_records:
-            base, ext = os.path.splitext(filename)
-            arcname   = filename
-            counter   = 1
-            while arcname in seen_names:
-                arcname = f"{base}_{counter}{ext}"
-                counter += 1
-            seen_names.add(arcname)
+        # Preload yo'q (auto-zip yoki xato) — parallel yuklaymiz
+        if not preloaded:
+            preloaded = await predownload_files(client, uid)
 
-            if file_id in preloaded:
-                fpath, _ = preloaded[file_id]
-                if os.path.isfile(fpath):
-                    downloaded.append((fpath, arcname))
-                    continue
-
-            save_path = os.path.join(udir, arcname)
-            try:
-                await client.download_media(file_id, file_name=save_path)
-                downloaded.append((save_path, arcname))
-            except Exception as e:
-                await error_to_admin(client, f"zip→download {file_type}", uid, e)
-
-        if not downloaded:
+        if not preloaded:
             raise RuntimeError("Hech bir fayl yuklab olinmadi")
 
-        # ③ ZIP yaratish
+        # ② ZIP yaratish (preloaded fayllardan)
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-            for fpath, arcname in downloaded:
+            for fid, (fpath, arcname) in preloaded.items():
                 if os.path.isfile(fpath):
                     zf.write(fpath, arcname=arcname)
 
-        # ④ ZIP yuborish
+        # ③ ZIP yuborish
         caption = tx(uid, "zip_caption")
         if auto:
             caption = tx(uid, "auto_zip_done") + "\n\n" + caption
@@ -575,7 +573,7 @@ async def create_and_send_zip(client, chat_id: int, uid: int,
         wm = user_welcome_msg.pop(uid, None)
         await safe_delete(wm)
 
-    # ⑤ Tozalash
+    # ④ Tozalash
     await cleanup_user(uid)
     user_auto_zip.pop(uid, None)
     user_download_task.pop(uid, None)
