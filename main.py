@@ -587,6 +587,37 @@ async def cmd_start(client, message):
         ]])
     )
     user_welcome_msg[uid] = sent
+# ════════════════════════════════════════════════════════════
+#  BAZANI QUTQARISH FUNKSIYALARI (ADMIN UCHUN)
+# ════════════════════════════════════════════════════════════
+
+@app.on_message(filters.command("getdb") & filters.user(ADMIN_ID))
+async def emergency_db_send(client, message):
+    """Bazani to'g'ridan-to'g'ri yuborish"""
+    await message.reply_text("Baza qidirilmoqda...")
+    if os.path.exists(DB_PATH):
+        try:
+            await message.reply_document(
+                document=DB_PATH,
+                caption=f"Baza topildi!\nYo'l: {DB_PATH}\nVaqt: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            )
+        except Exception as e:
+            await message.reply_text(f"Faylni yuborishda xatolik: {e}")
+    else:
+        await message.reply_text(f"Afsus, baza topilmadi. Yo'lni tekshiring: {DB_PATH}")
+
+@app.on_message(filters.command("ls") & filters.user(ADMIN_ID))
+async def list_volume_files(client, message):
+    """Volume ichida nima borligini ko'rish (yo'lni aniqlash uchun)"""
+    try:
+        if os.path.exists(VOLUME_PATH):
+            files = os.listdir(VOLUME_PATH)
+            files_str = "\n".join(files) if files else "Papka bo'sh"
+            await message.reply_text(f"Volume ichidagi fayllar ({VOLUME_PATH}):\n\n{files_str}")
+        else:
+            await message.reply_text(f"Volume yo'li topilmadi: {VOLUME_PATH}")
+    except Exception as e:
+        await message.reply_text(f"Xatolik: {e}")
 
 # ════════════════════════════════════════════════════════════
 #  TIL TANLASH
