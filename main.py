@@ -4,28 +4,34 @@ import shutil
 import zipfile
 import asyncio
 import threading
-import sqlite3
+import libsql_experimental as libsql
 from datetime import datetime
 from flask import Flask
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
 
 # ════════════════════════════════════════════════════════════
-#  CONFIG
+#  CONFIG  (hammasi environment variable dan olinadi)
 # ════════════════════════════════════════════════════════════
-API_ID    = int(os.environ.get("API_ID",    29517932))
-API_HASH  = os.environ.get("API_HASH",  "572b177f48692c0cbd88664120fb87f4")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "7579799414:AAGDyXOzKEWKtk4D4N6Vsi3X5qngmPr0uiE")
+API_ID    = int(os.environ["API_ID"])
+API_HASH  = os.environ["API_HASH"]
+BOT_TOKEN = os.environ["BOT_TOKEN"]
+
+# Turso (libSQL) credentials — Railway environment variables da bo'lishi kerak:
+#   TURSO_URL   = libsql://your-db-name.turso.io
+#   TURSO_TOKEN = eyJ...
+TURSO_URL   = os.environ.get("TURSO_URL",   "")
+TURSO_TOKEN = os.environ.get("TURSO_TOKEN", "")
+
+# Lokal replica fayli (Railway restart bo'lsa Turso'dan qayta sinxronlanadi)
+LOCAL_DB = "/tmp/bot_replica.db"
 
 BASE_DIR       = "user_files"
 STICKER_DIR    = "stickers"
-ADMIN_ID       = 1663567950
+ADMIN_ID       = int(os.environ.get("ADMIN_ID", "1663567950"))
 MAX_STORAGE    = 300 * 1024 * 1024   # 300 MB
 AUTO_ZIP_DELAY = 60                   # 1 daqiqa
 DEBOUNCE_SEC   = 1.5                  # batch kutish
-
-VOLUME_PATH = os.environ.get("VOLUME_PATH", "/app/data")
-DB_PATH     = os.path.join(VOLUME_PATH, "bot.db")
 
 # ════════════════════════════════════════════════════════════
 #  IN-MEMORY STATE
@@ -40,119 +46,144 @@ user_debounce:       dict = {}  # {uid: Task}
 user_downloading:    dict = {}  # {uid: int}  — hozir yuklanayotgan fayllar soni
 
 # ════════════════════════════════════════════════════════════
-#  VOLUME CHECK
+#  TURSO (libSQL) — DB ulanish
 # ════════════════════════════════════════════════════════════
-def check_volume():
-    print(f"[VOLUME] DB: {DB_PATH} | exists: {os.path.exists(VOLUME_PATH)}")
-    if os.path.exists(VOLUME_PATH):
-        files = os.listdir(VOLUME_PATH)
-        if "bot.db" in files:
-            print(f"[VOLUME] bot.db OK — {os.path.getsize(DB_PATH)} bytes")
-        else:
-            print("[VOLUME] bot.db topilmadi — yangi yaratiladi")
+_db_conn = None   # global connection
+
+def get_db() -> libsql.Connection:
+    """
+    Turso ga ulangan connection qaytaradi.
+    Agar TURSO_URL bo'lmasa — lokal SQLite ishlatiladi (dev rejim).
+    """
+    global _db_conn
+    if _db_conn is not None:
+        return _db_conn
+
+    if TURSO_URL:
+        _db_conn = libsql.connect(
+            LOCAL_DB,
+            sync_url=TURSO_URL,
+            auth_token=TURSO_TOKEN,
+        )
+        _db_conn.sync()   # Turso'dan lokal replikaga sinxronlash
+        print(f"[DB] Turso ulandi: {TURSO_URL}")
     else:
-        print(f"[VOLUME] Volume mavjud emas: {VOLUME_PATH}")
+        # Dev rejim — oddiy lokal SQLite
+        _db_conn = libsql.connect(LOCAL_DB)
+        print(f"[DB] Lokal SQLite: {LOCAL_DB}")
+
+    return _db_conn
+
+
+def db_sync():
+    """Write dan keyin Turso'ga sinxronlash"""
+    if TURSO_URL and _db_conn:
+        try:
+            _db_conn.sync()
+        except Exception as e:
+            print(f"[db_sync error] {e}")
 
 # ════════════════════════════════════════════════════════════
-#  DATABASE  (faqat users jadvali)
+#  DATABASE
 # ════════════════════════════════════════════════════════════
 def init_db():
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                telegram_id INTEGER UNIQUE NOT NULL,
-                first_name  TEXT    DEFAULT '',
-                last_name   TEXT    DEFAULT '',
-                username    TEXT    DEFAULT '',
-                language    TEXT    DEFAULT 'uz',
-                waiting_zip INTEGER DEFAULT 0,
-                is_banned   INTEGER DEFAULT 0,
-                joined_at   TEXT    NOT NULL
-            )
-        """)
-        for col, dfn in [
-            ("waiting_zip", "INTEGER DEFAULT 0"),
-            ("is_banned",   "INTEGER DEFAULT 0"),
-        ]:
-            try:
-                conn.execute(f"ALTER TABLE users ADD COLUMN {col} {dfn}")
-            except Exception:
-                pass
-        conn.commit()
-    print(f"[DB] tayyor: {DB_PATH}")
+    c = get_db()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            telegram_id INTEGER UNIQUE NOT NULL,
+            first_name  TEXT    DEFAULT '',
+            last_name   TEXT    DEFAULT '',
+            username    TEXT    DEFAULT '',
+            language    TEXT    DEFAULT 'uz',
+            waiting_zip INTEGER DEFAULT 0,
+            is_banned   INTEGER DEFAULT 0,
+            joined_at   TEXT    NOT NULL
+        )
+    """)
+    for col, dfn in [
+        ("waiting_zip", "INTEGER DEFAULT 0"),
+        ("is_banned",   "INTEGER DEFAULT 0"),
+    ]:
+        try:
+            c.execute(f"ALTER TABLE users ADD COLUMN {col} {dfn}")
+        except Exception:
+            pass
+    c.commit()
+    db_sync()
+    print("[DB] jadval tayyor")
 
 
 def upsert_user(user, lang=None):
-    with sqlite3.connect(DB_PATH) as c:
-        c.execute("""
-            INSERT INTO users(telegram_id,first_name,last_name,username,language,joined_at)
-            VALUES(?,?,?,?,?,?)
-            ON CONFLICT(telegram_id) DO UPDATE SET
-                first_name=excluded.first_name,
-                last_name=excluded.last_name,
-                username=excluded.username,
-                language=COALESCE(?,language)
-        """, (user.id, user.first_name or "", user.last_name or "",
-              user.username or "", lang or "uz",
-              datetime.now().strftime("%Y-%m-%d %H:%M:%S"), lang))
-        c.commit()
+    c = get_db()
+    c.execute("""
+        INSERT INTO users(telegram_id,first_name,last_name,username,language,joined_at)
+        VALUES(?,?,?,?,?,?)
+        ON CONFLICT(telegram_id) DO UPDATE SET
+            first_name=excluded.first_name,
+            last_name=excluded.last_name,
+            username=excluded.username,
+            language=COALESCE(?,language)
+    """, (user.id, user.first_name or "", user.last_name or "",
+          user.username or "", lang or "uz",
+          datetime.now().strftime("%Y-%m-%d %H:%M:%S"), lang))
+    c.commit()
+    db_sync()
 
 def get_lang(uid: int):
-    with sqlite3.connect(DB_PATH) as c:
-        r = c.execute("SELECT language FROM users WHERE telegram_id=?", (uid,)).fetchone()
+    c = get_db()
+    r = c.execute("SELECT language FROM users WHERE telegram_id=?", (uid,)).fetchone()
     return r[0] if r else None
 
 def is_banned(uid: int) -> bool:
-    with sqlite3.connect(DB_PATH) as c:
-        r = c.execute("SELECT is_banned FROM users WHERE telegram_id=?", (uid,)).fetchone()
+    c = get_db()
+    r = c.execute("SELECT is_banned FROM users WHERE telegram_id=?", (uid,)).fetchone()
     return bool(r[0]) if r else False
 
 def ban_user(uid: int):
-    with sqlite3.connect(DB_PATH) as c:
-        c.execute("UPDATE users SET is_banned=1 WHERE telegram_id=?", (uid,))
-        c.commit()
+    c = get_db()
+    c.execute("UPDATE users SET is_banned=1 WHERE telegram_id=?", (uid,))
+    c.commit(); db_sync()
 
 def unban_user(uid: int):
-    with sqlite3.connect(DB_PATH) as c:
-        c.execute("UPDATE users SET is_banned=0 WHERE telegram_id=?", (uid,))
-        c.commit()
+    c = get_db()
+    c.execute("UPDATE users SET is_banned=0 WHERE telegram_id=?", (uid,))
+    c.commit(); db_sync()
 
 def set_waiting(uid: int, val: bool):
-    with sqlite3.connect(DB_PATH) as c:
-        c.execute("UPDATE users SET waiting_zip=? WHERE telegram_id=?", (int(val), uid))
-        c.commit()
+    c = get_db()
+    c.execute("UPDATE users SET waiting_zip=? WHERE telegram_id=?", (int(val), uid))
+    c.commit(); db_sync()
 
 def is_waiting(uid: int) -> bool:
-    with sqlite3.connect(DB_PATH) as c:
-        r = c.execute("SELECT waiting_zip FROM users WHERE telegram_id=?", (uid,)).fetchone()
+    c = get_db()
+    r = c.execute("SELECT waiting_zip FROM users WHERE telegram_id=?", (uid,)).fetchone()
     return bool(r[0]) if r else False
 
 def all_users() -> list:
-    with sqlite3.connect(DB_PATH) as c:
-        return c.execute(
-            "SELECT telegram_id,first_name,last_name,username,language,joined_at,is_banned "
-            "FROM users ORDER BY id DESC"
-        ).fetchall()
+    c = get_db()
+    return c.execute(
+        "SELECT telegram_id,first_name,last_name,username,language,joined_at,is_banned "
+        "FROM users ORDER BY id DESC"
+    ).fetchall()
 
 def user_count() -> int:
-    with sqlite3.connect(DB_PATH) as c:
-        return c.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+    c = get_db()
+    return c.execute("SELECT COUNT(*) FROM users").fetchone()[0]
 
 def today_count() -> int:
     t = datetime.now().strftime("%Y-%m-%d")
-    with sqlite3.connect(DB_PATH) as c:
-        return c.execute(
-            "SELECT COUNT(*) FROM users WHERE joined_at LIKE ?", (f"{t}%",)
-        ).fetchone()[0]
+    c = get_db()
+    return c.execute(
+        "SELECT COUNT(*) FROM users WHERE joined_at LIKE ?", (f"{t}%",)
+    ).fetchone()[0]
 
 def get_user_by_id(tid: int):
-    with sqlite3.connect(DB_PATH) as c:
-        return c.execute(
-            "SELECT telegram_id,first_name,last_name,username,language,joined_at,is_banned "
-            "FROM users WHERE telegram_id=?", (tid,)
-        ).fetchone()
+    c = get_db()
+    return c.execute(
+        "SELECT telegram_id,first_name,last_name,username,language,joined_at,is_banned "
+        "FROM users WHERE telegram_id=?", (tid,)
+    ).fetchone()
 
 # ════════════════════════════════════════════════════════════
 #  TEXTS
@@ -196,7 +227,7 @@ TEXTS = {
             "⏳ *Fayllar hali yuklanmoqda...*\n\n"
             "Iltimos bir oz kuting, keyin nom yuboring."
         ),
-        "zip_caption":  "📦 *ZIP tayyor!*\n\n🤖 @Zipla_bot — Hayotni Ziplab o't!",
+        "zip_caption":  "📦 *ZIP tayyor!*\n\n🤖 @Zipla\\_bot — Hayotni Ziplab o't!",
         "no_files":     "⚠️ Avval fayl yuboring.",
         "zip_error":    "❌ ZIP yaratishda xato. Qaytadan urining.",
         "bad_name":     "❌ *Noto'g'ri nom!* Harf, raqam, bo'sh joy, `-` va `_` ishlating.",
@@ -243,7 +274,7 @@ TEXTS = {
             "⏳ *Files are still uploading...*\n\n"
             "Please wait a moment, then send the name."
         ),
-        "zip_caption":  "📦 *ZIP is ready!*\n\n🤖 @Zipla_bot — Zip your life!",
+        "zip_caption":  "📦 *ZIP is ready!*\n\n🤖 @Zipla\\_bot — Zip your life!",
         "no_files":     "⚠️ Please send files first.",
         "zip_error":    "❌ ZIP creation failed. Please try again.",
         "bad_name":     "❌ *Invalid name!* Use letters, numbers, spaces, `-` and `_`.",
@@ -321,6 +352,21 @@ def fmt_size(b: int) -> str:
     if b < 1024 ** 2:
         return f"{b/1024:.1f} KB"
     return f"{b/1024**2:.1f} MB"
+
+def sanitize_filename(filename: str) -> str:
+    """
+    Fayl nomidagi muammoli belgilarni tozalash.
+    Bo'sh joylar va maxsus belgilar _ ga aylantiriladi.
+    Pyrogram .temp fayl yaratishda path xatosi bo'lmasin.
+    """
+    # Windows/Linux da muammoli belgilar
+    name = re.sub(r'[\\/:*?"<>|]', '_', filename)
+    # Ko'p bo'sh joy/tire/pastki chiziqni bittaga
+    name = re.sub(r'[\s]+', '_', name)
+    # Bosh/oxir bo'sh va nuqta
+    name = name.strip('._')
+    # Bo'sh qolsa default nom
+    return name if name else f"file_{datetime.now():%Y%m%d_%H%M%S}"
 
 async def safe_delete(msg):
     if msg is None:
@@ -542,8 +588,10 @@ async def receive_file(client, message: Message, obj, filename: str):
     restart_debounce(client, message.chat.id, uid)
 
     # Faylni serverga yuklash
-    udir      = user_dir(uid)
-    save_path = unique_path(udir, filename)
+    udir      = user_dir(uid)                        # papka yaratib olish
+    safe_name = sanitize_filename(filename)          # nom tozalash
+    save_path = unique_path(udir, safe_name)
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)  # temp uchun kafolat
     try:
         await message.download(file_name=save_path)
     except Exception as e:
@@ -587,37 +635,6 @@ async def cmd_start(client, message):
         ]])
     )
     user_welcome_msg[uid] = sent
-# ════════════════════════════════════════════════════════════
-#  BAZANI QUTQARISH FUNKSIYALARI (ADMIN UCHUN)
-# ════════════════════════════════════════════════════════════
-
-@app.on_message(filters.command("getdb") & filters.user(ADMIN_ID))
-async def emergency_db_send(client, message):
-    """Bazani to'g'ridan-to'g'ri yuborish"""
-    await message.reply_text("Baza qidirilmoqda...")
-    if os.path.exists(DB_PATH):
-        try:
-            await message.reply_document(
-                document=DB_PATH,
-                caption=f"Baza topildi!\nYo'l: {DB_PATH}\nVaqt: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-            )
-        except Exception as e:
-            await message.reply_text(f"Faylni yuborishda xatolik: {e}")
-    else:
-        await message.reply_text(f"Afsus, baza topilmadi. Yo'lni tekshiring: {DB_PATH}")
-
-@app.on_message(filters.command("ls") & filters.user(ADMIN_ID))
-async def list_volume_files(client, message):
-    """Volume ichida nima borligini ko'rish (yo'lni aniqlash uchun)"""
-    try:
-        if os.path.exists(VOLUME_PATH):
-            files = os.listdir(VOLUME_PATH)
-            files_str = "\n".join(files) if files else "Papka bo'sh"
-            await message.reply_text(f"Volume ichidagi fayllar ({VOLUME_PATH}):\n\n{files_str}")
-        else:
-            await message.reply_text(f"Volume yo'li topilmadi: {VOLUME_PATH}")
-    except Exception as e:
-        await message.reply_text(f"Xatolik: {e}")
 
 # ════════════════════════════════════════════════════════════
 #  TIL TANLASH
@@ -916,7 +933,7 @@ async def cmd_admin(client, message):
         f"🔐 *Admin Panel*\n\n"
         f"👥 Jami: *{cnt}* | 📅 Bugun: *{today}*\n"
         f"💾 Disk: *{disk}*\n"
-        f"🗄️ `{DB_PATH}`",
+        f"🗄️ DB: `{'Turso' if TURSO_URL else 'Lokal SQLite'}`",
         parse_mode=enums.ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("👥 Foydalanuvchilar",    callback_data="adm_users"),
@@ -1055,18 +1072,21 @@ async def adm_clear(client, call):
 
 @app.on_callback_query(admin_filter & filters.create(lambda _, __, q: q.data == "adm_volume"))
 async def adm_volume_check(client, call):
-    exists = os.path.exists(VOLUME_PATH)
-    lines  = [f"🔁 *Volume*\nPath: `{VOLUME_PATH}` | Mavjud: `{exists}`"]
-    if exists:
-        vfiles = os.listdir(VOLUME_PATH)
-        lines.append(f"Fayllar: `{vfiles}`")
-        if "bot.db" in vfiles:
-            lines.append(f"bot.db: `{fmt_size(os.path.getsize(DB_PATH))}`")
-            lines.append(f"Foydalanuvchilar: `{user_count()}`")
-        else:
-            lines.append("⚠️ bot.db topilmadi!")
+    if TURSO_URL:
+        lines = [
+            f"🗄️ *Turso DB*\n",
+            f"URL: `{TURSO_URL[:40]}...`",
+            f"Lokal replica: `{LOCAL_DB}`",
+            f"Replica mavjud: `{os.path.exists(LOCAL_DB)}`",
+            f"Foydalanuvchilar: `{user_count()}`",
+        ]
     else:
-        lines.append("❌ Volume mount qilinmagan!")
+        lines = [
+            "⚠️ *Turso ulanmagan!*\n",
+            "Railway Environment Variables da qo'shing:\n",
+            "`TURSO_URL` = libsql://your-db.turso.io",
+            "`TURSO_TOKEN` = eyJ...",
+        ]
     await call.message.reply("\n".join(lines), parse_mode=enums.ParseMode.MARKDOWN)
     await call.answer()
 
@@ -1081,7 +1101,8 @@ def keep_alive():
         return (
             f"Bot ishlayapti! "
             f"Foydalanuvchilar: {user_count()} | "
-            f"Disk: {fmt_size(total_disk_all())}"
+            f"Disk: {fmt_size(total_disk_all())} | "
+            f"Turso: {'ulangan' if TURSO_URL else 'lokal'}"
         )
 
     port = int(os.environ.get("PORT", 5000))
@@ -1091,9 +1112,10 @@ def keep_alive():
 #  MAIN
 # ════════════════════════════════════════════════════════════
 if __name__ == "__main__":
-    check_volume()
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    init_db()
+    if not all([os.environ.get("API_ID"), os.environ.get("API_HASH"), os.environ.get("BOT_TOKEN")]):
+        raise RuntimeError("API_ID, API_HASH, BOT_TOKEN environment variable lari to'ldirilmagan!")
+    get_db()     # ulanish va lokal replica yaratish
+    init_db()    # jadvallarni yaratish / yangilash
     os.makedirs(BASE_DIR,    exist_ok=True)
     os.makedirs(STICKER_DIR, exist_ok=True)
     threading.Thread(target=keep_alive, daemon=True).start()
