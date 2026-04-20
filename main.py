@@ -53,31 +53,31 @@ _db_conn = None   # global connection
 def get_db() -> libsql.Connection:
     """
     Turso ga ulangan connection qaytaradi.
-    Agar TURSO_URL bo'lmasa — lokal SQLite ishlatiladi (dev rejim).
+    TURSO_URL bo'lmasa — bot ishga tushmaydi (fallback YO'Q).
     """
     global _db_conn
     if _db_conn is not None:
         return _db_conn
 
-    if TURSO_URL:
-        _db_conn = libsql.connect(
-            LOCAL_DB,
-            sync_url=TURSO_URL,
-            auth_token=TURSO_TOKEN,
+    if not TURSO_URL or not TURSO_TOKEN:
+        raise RuntimeError(
+            "TURSO_URL va TURSO_TOKEN environment variable lari to'ldirilmagan! "
+            "Railway → Variables da qo'shing."
         )
-        _db_conn.sync()   # Turso'dan lokal replikaga sinxronlash
-        print(f"[DB] Turso ulandi: {TURSO_URL}")
-    else:
-        # Dev rejim — oddiy lokal SQLite
-        _db_conn = libsql.connect(LOCAL_DB)
-        print(f"[DB] Lokal SQLite: {LOCAL_DB}")
 
+    _db_conn = libsql.connect(
+        LOCAL_DB,
+        sync_url=TURSO_URL,
+        auth_token=TURSO_TOKEN,
+    )
+    _db_conn.sync()
+    print(f"[DB] Turso ulandi: {TURSO_URL}")
     return _db_conn
 
 
 def db_sync():
     """Write dan keyin Turso'ga sinxronlash"""
-    if TURSO_URL and _db_conn:
+    if _db_conn:
         try:
             _db_conn.sync()
         except Exception as e:
@@ -227,7 +227,7 @@ TEXTS = {
             "⏳ *Fayllar hali yuklanmoqda...*\n\n"
             "Iltimos bir oz kuting, keyin nom yuboring."
         ),
-        "zip_caption":  "📦 *ZIP tayyor!*\n\n🤖 @Zipla\\_bot — Hayotni Ziplab o't!",
+        "zip_caption":  "📦 *ZIP tayyor!*\n\n🤖 @Zipla_bot — Hayotni Ziplab o't!",
         "no_files":     "⚠️ Avval fayl yuboring.",
         "zip_error":    "❌ ZIP yaratishda xato. Qaytadan urining.",
         "bad_name":     "❌ *Noto'g'ri nom!* Harf, raqam, bo'sh joy, `-` va `_` ishlating.",
@@ -274,7 +274,7 @@ TEXTS = {
             "⏳ *Files are still uploading...*\n\n"
             "Please wait a moment, then send the name."
         ),
-        "zip_caption":  "📦 *ZIP is ready!*\n\n🤖 @Zipla\\_bot — Zip your life!",
+        "zip_caption":  "📦 *ZIP is ready!*\n\n🤖 @Zipla_bot — Zip your life!",
         "no_files":     "⚠️ Please send files first.",
         "zip_error":    "❌ ZIP creation failed. Please try again.",
         "bad_name":     "❌ *Invalid name!* Use letters, numbers, spaces, `-` and `_`.",
@@ -340,13 +340,23 @@ def all_users_disk() -> list:
     result.sort(key=lambda x: x[1], reverse=True)
     return result
 
+_file_counter = 0
+_file_counter_lock = threading.Lock()
+
 def unique_path(directory: str, filename: str) -> str:
-    full = os.path.join(directory, filename)
-    if not os.path.exists(full):
-        return full
+    """
+    Race-condition xavfsiz noyob fayl yo'li.
+    Grouped media (album) kelganda bir xil nom bo'lishini oldini oladi.
+    """
+    global _file_counter
+    with _file_counter_lock:
+        _file_counter += 1
+        counter = _file_counter
+
     base, ext = os.path.splitext(filename)
-    stamp = datetime.now().strftime("%H%M%S_%f")[:9]
-    return os.path.join(directory, f"{base}_{stamp}{ext}")
+    stamp     = datetime.now().strftime("%H%M%S_%f")  # mikrosaniya bilan
+    candidate = os.path.join(directory, f"{base}_{stamp}_{counter}{ext}")
+    return candidate
 
 def fmt_size(b: int) -> str:
     if b < 1024 ** 2:
@@ -472,8 +482,13 @@ def restart_debounce(client, chat_id: int, uid: int):
 # ════════════════════════════════════════════════════════════
 async def _auto_zip_runner(client, chat_id: int, uid: int, delay: int):
     await asyncio.sleep(delay)
-    if file_count(uid) == 0 or is_waiting(uid):
+    if file_count(uid) == 0:
         return
+    # waiting=True yoki False bo'lishidan qat'i nazar — tozalash vaqti keldi
+    set_waiting(uid, False)
+    # "nom so'rash" xabarini o'chirish
+    sm = user_status_msg.pop(uid, None)
+    await safe_delete(sm)
     auto_name = f"auto_{datetime.now():%Y%m%d_%H%M%S}"
     await create_and_send_zip(client, chat_id, uid, auto_name, auto=True)
 
@@ -496,10 +511,16 @@ async def create_and_send_zip(client, chat_id: int, uid: int,
     zip_name = f"{zip_name_raw}.zip"
     zip_path = os.path.join(udir, zip_name)
 
-    progress = await client.send_message(
-        chat_id, tx(uid, "creating_zip"),
-        parse_mode=enums.ParseMode.MARKDOWN,
-    )
+    # Agar user_status_msg allaqachon "ZIP qilinmoqda" ko'rsatayotgan bo'lsa —
+    # yangi xabar yubormaymiz, aks holda (auto-zip) yangi xabar yuboramiz
+    existing_sm = user_status_msg.get(uid)
+    if existing_sm is None:
+        progress = await client.send_message(
+            chat_id, tx(uid, "creating_zip"),
+            parse_mode=enums.ParseMode.MARKDOWN,
+        )
+    else:
+        progress = None   # allaqachon ko'rsatilgan
     try:
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
             for fname in files:
@@ -574,12 +595,10 @@ async def receive_file(client, message: Message, obj, filename: str):
         )
         user_status_msg[uid] = sfm
         set_waiting(uid, True)
+        # Nom kiritilmasa 40 soniyada avto-zip (waiting holatida ham ishlaydi)
         await cancel_task(user_auto_zip, uid)
         start_auto_zip(client, message.chat.id, uid, delay=40)
         return
-
-    # Foydalanuvchi xabarini darhol o'chirish
-    await safe_delete(message)
 
     # Yuklanayotganlar sonini oshirish
     user_downloading[uid] = user_downloading.get(uid, 0) + 1
@@ -587,20 +606,21 @@ async def receive_file(client, message: Message, obj, filename: str):
     # Debounce — "qabul qilinmoqda" xabari
     restart_debounce(client, message.chat.id, uid)
 
-    # Faylni serverga yuklash
-    udir      = user_dir(uid)                        # papka yaratib olish
-    safe_name = sanitize_filename(filename)          # nom tozalash
+    # Faylni serverga yuklash — o'chirishdan OLDIN
+    udir      = user_dir(uid)                 # papka mavjudligini kafolatlash
+    safe_name = sanitize_filename(filename)
     save_path = unique_path(udir, safe_name)
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)  # temp uchun kafolat
     try:
         await message.download(file_name=save_path)
     except Exception as e:
         await error_to_admin(client, "receive_file→download", uid, e)
     finally:
-        # Yuklandi yoki xato — yuklanayotganlar sonini kamaytir
         user_downloading[uid] = max(0, user_downloading.get(uid, 1) - 1)
 
-    # Yuklanib bo'ldi — statusni yangilash uchun debounce qayta ishga tush
+    # Yuklab bo'lingach xabarni o'chirish
+    await safe_delete(message)
+
+    # Status yangilansin
     restart_debounce(client, message.chat.id, uid)
 
     # Auto-zip taymerni qayta boshlash
@@ -747,6 +767,11 @@ async def cb_zip_now(client, call):
         parse_mode=enums.ParseMode.MARKDOWN,
     )
     user_status_msg[uid] = sent
+
+    # Foydalanuvchi nom kiritmasa ham — 90 soniyada avto-zip
+    # (waiting=True bo'lsa ham auto_zip_runner ishga tushadi)
+    start_auto_zip(client, call.message.chat.id, uid, delay=90)
+
     await call.answer()
 
 # ════════════════════════════════════════════════════════════
@@ -911,8 +936,19 @@ async def on_text(client, message):
     set_waiting(uid, False)
     await cancel_task(user_auto_zip, uid)
 
+    # "Nom so'rash" xabarini "ZIP qilinmoqda" ga aylantiramiz
     sm = user_status_msg.pop(uid, None)
-    await safe_delete(sm)
+    if sm:
+        try:
+            await sm.edit_text(
+                tx(uid, "creating_zip"),
+                parse_mode=enums.ParseMode.MARKDOWN,
+            )
+            # create_and_send_zip o'z progress xabarini yubormasin —
+            # biz allaqachon ko'rsatyapmiz, shu xabarni finally da o'chirib yuboramiz
+            user_status_msg[uid] = sm
+        except Exception:
+            pass
 
     await create_and_send_zip(client, message.chat.id, uid, zip_name_clean)
 
