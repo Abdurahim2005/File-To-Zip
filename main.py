@@ -676,8 +676,13 @@ def start_auto_zip(client, chat_id: int, uid: int,
 #  ZIP YARATISH  (Queue + STORED compression)
 # ════════════════════════════════════════════════════════════
 async def create_and_send_zip(client, chat_id: int, uid: int,
-                               zip_name_raw: str, auto: bool = False):
-    udir  = user_dir(uid)
+                             zip_name_raw: str, auto: bool = False):
+    # 1. Global semaforni funksiya boshida sozlaymiz (Sintaksis xatosi tuzatildi)
+    global ZIP_SEMAPHORE
+    if ZIP_SEMAPHORE is None:
+        ZIP_SEMAPHORE = asyncio.Semaphore(2)
+
+    udir = user_dir(uid)
     files = [f for f in os.listdir(udir) if os.path.isfile(os.path.join(udir, f))]
     if not files:
         return
@@ -685,69 +690,77 @@ async def create_and_send_zip(client, chat_id: int, uid: int,
     zip_name = f"{zip_name_raw}.zip"
     zip_path = os.path.join(udir, zip_name)
 
-    # Mavjud status xabarini "ZIP qilinmoqda" ga aylantirish yoki yangi yuborish
+    # 2. Status xabarini tayyorlash
     existing_sm = user_status_msg.get(uid)
+    progress = None
     if existing_sm:
         try:
-            await existing_sm.edit_text(tx(uid, "creating_zip"),
-                                         parse_mode=enums.ParseMode.MARKDOWN)
+            progress = await existing_sm.edit_text(tx(uid, "creating_zip"),
+                                                 parse_mode=enums.ParseMode.MARKDOWN)
         except Exception:
             existing_sm = None
 
     if not existing_sm:
         progress = await client.send_message(
             chat_id, tx(uid, "creating_zip"), parse_mode=enums.ParseMode.MARKDOWN)
-    else:
-        progress = None
 
-    # ── NAVBAT (Queue) ──
+    # 3. Navbatni tekshirish (Semafor locked bo'lsa xabar berish)
     queue_msg = None
-    if ZIP_SEMAPHORE and ZIP_SEMAPHORE.locked():
+    if ZIP_SEMAPHORE.locked():
         queue_msg = await client.send_message(
             chat_id, tx(uid, "zip_queue"), parse_mode=enums.ParseMode.MARKDOWN)
 
+    # 4. ZIP jarayoni (Navbat tizimi bilan)
     async with ZIP_SEMAPHORE:
-        await safe_delete(queue_msg)
+        # Navbat xabarini o'chirish (agar bo'lsa)
+        if queue_msg:
+            await safe_delete(queue_msg)
+            
         fcount = len(files)
         try:
-            # ZIP_STORED — siqmasdan, CPU yuklama minimal
+            # ZIP_STORED — CPU yuklamasini kamaytirish uchun siqmasdan arxivlash
             with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_STORED) as zf:
                 for fname in files:
                     fpath = os.path.join(udir, fname)
+                    # ZIP faylning o'zini o'ziga qo'shib qo'ymaslik uchun tekshiruv
                     if os.path.isfile(fpath) and fname != zip_name:
                         zf.write(fpath, arcname=fname)
 
             zip_size = os.path.getsize(zip_path) if os.path.exists(zip_path) else 0
-            caption  = tx(uid, "zip_caption")
+            caption = tx(uid, "zip_caption")
             if auto:
                 caption = tx(uid, "auto_zip_done") + "\n\n" + caption
 
+            # Faylni yuborish
             await client.send_document(
                 chat_id, zip_path,
                 caption=caption, file_name=zip_name,
                 parse_mode=enums.ParseMode.MARKDOWN,
             )
-            # Statistikaga yozish
+            
+            # Statistika
             add_zip_stat(uid, zip_size / 1024 / 1024, fcount)
 
         except Exception as e:
             await client.send_message(chat_id, tx(uid, "zip_error"),
-                                       parse_mode=enums.ParseMode.MARKDOWN)
+                                     parse_mode=enums.ParseMode.MARKDOWN)
             await error_to_admin(client, "create_and_send_zip", uid, e)
             return
         finally:
+            # Xabarlarni tozalash (Progress va statuslarni o'chirish)
             await safe_delete(progress)
             sm = user_status_msg.pop(uid, None)
             await safe_delete(sm)
             wm = user_welcome_msg.pop(uid, None)
             await safe_delete(wm)
 
-    # Tozalash
-    try:
-        shutil.rmtree(udir)
-        os.makedirs(udir, exist_ok=True)
-    except Exception as e:
-        print(f"[cleanup] {e}")
+            # 5. Tozalash (Juda muhim: Railway diski to'lib qolmasligi uchun)
+            try:
+                if os.path.exists(udir):
+                    shutil.rmtree(udir)
+                    os.makedirs(udir, exist_ok=True)
+            except Exception as e:
+                print(f"[cleanup error] {uid}: {e}")
 
     user_auto_zip.pop(uid, None)
 
@@ -1465,7 +1478,6 @@ def keep_alive():
 #  MAIN
 # ════════════════════════════════════════════════════════════
 if __name__ == "__main__":
-    global ZIP_SEMAPHORE
     if not all([os.environ.get("API_ID"), os.environ.get("API_HASH"), os.environ.get("BOT_TOKEN")]):
         raise RuntimeError("API_ID, API_HASH, BOT_TOKEN to'ldirilmagan!")
     get_db()
