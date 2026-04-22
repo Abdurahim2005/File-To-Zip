@@ -8,7 +8,7 @@ from datetime import datetime, date, timedelta
 
 import libsql_experimental as libsql
 from flask import Flask
-from pyrogram import Client, filters, enums, idle
+from pyrogram import Client, filters, enums
 from pyrogram.types import (
     InlineKeyboardMarkup,
     InlineKeyboardButton,
@@ -1401,6 +1401,8 @@ async def receive_file(client, message: Message, obj, filename: str):
         await safe_delete(message)
         return
 
+    await maybe_send_premium_expiry_warning(client, uid, message.chat.id)
+
     if uid in waiting_for_payment_screenshot:
         await safe_delete(message)
         await client.send_message(
@@ -1505,6 +1507,8 @@ async def cmd_start(client, message):
     if is_banned(uid):
         return
 
+    await maybe_send_premium_expiry_warning(client, uid, message.chat.id)
+
     lang = get_lang(uid)
     if lang is None:
         upsert_user(message.from_user, "uz")
@@ -1599,6 +1603,7 @@ async def cb_change_lang(client, call):
 async def cb_check_join(client, call):
     uid = call.from_user.id
     lang = get_lang(uid) or "uz"
+    await maybe_send_premium_expiry_warning(client, uid, call.message.chat.id)
     missing = await check_subscription(client, uid)
     if missing:
         await call.answer(TEXTS[lang]["join_fail"], show_alert=True)
@@ -1657,6 +1662,7 @@ async def cb_premium_paid(client, call):
 async def cb_zip_now(client, call):
     uid = call.from_user.id
     user = call.from_user
+    await maybe_send_premium_expiry_warning(client, uid, call.message.chat.id)
 
     if file_count(uid) == 0:
         await call.answer(tx(uid, "no_files"), show_alert=True)
@@ -1855,6 +1861,8 @@ async def on_text(client, message):
     if is_banned(uid):
         await safe_delete(message)
         return
+
+    await maybe_send_premium_expiry_warning(client, uid, message.chat.id)
 
     if get_lang(uid) is None:
         upsert_user(message.from_user, "uz")
@@ -2351,42 +2359,43 @@ def keep_alive():
     flask_app.run(host="0.0.0.0", port=port)
 
 
-async def premium_expiry_notifier():
-    while True:
-        cleanup_expired_premium_sync()
-        rows = get_db().execute(
-            """
-            SELECT telegram_id, premium_expiry
-            FROM users
-            WHERE is_premium=1 AND premium_warned=0 AND premium_expiry<>''
-        """
-        ).fetchall()
-        for uid, expiry in rows:
-            expiry_dt = parse_dt(expiry)
-            if not expiry_dt:
-                continue
-            now = datetime.now()
-            if now < expiry_dt <= now + timedelta(days=1):
-                try:
-                    await app.send_message(
-                        uid,
-                        tx(uid, "premium_expiry_warn", expiry=expiry),
-                        parse_mode=enums.ParseMode.MARKDOWN,
-                        reply_markup=main_menu(uid),
-                    )
-                    c = get_db()
-                    c.execute("UPDATE users SET premium_warned=1 WHERE telegram_id=?", (uid,))
-                    c.commit()
-                    db_sync()
-                except Exception:
-                    pass
-        await asyncio.sleep(3600)
+async def maybe_send_premium_expiry_warning(client, uid: int, chat_id: int):
+    cleanup_expired_premium_for_user(uid)
+    row = get_db().execute(
+        "SELECT is_premium, premium_expiry, premium_warned FROM users WHERE telegram_id=?",
+        (uid,),
+    ).fetchone()
+    if not row:
+        return
+    if not row[0] or row[2]:
+        return
+
+    expiry = row[1] or ""
+    expiry_dt = parse_dt(expiry)
+    if not expiry_dt:
+        return
+
+    now = datetime.now()
+    if now < expiry_dt <= now + timedelta(days=1):
+        try:
+            await client.send_message(
+                chat_id,
+                tx(uid, "premium_expiry_warn", expiry=expiry),
+                parse_mode=enums.ParseMode.MARKDOWN,
+                reply_markup=main_menu(uid),
+            )
+            c = get_db()
+            c.execute("UPDATE users SET premium_warned=1 WHERE telegram_id=?", (uid,))
+            c.commit()
+            db_sync()
+        except Exception:
+            pass
 
 
 # ============================================================
 # MAIN
 # ============================================================
-async def main():
+def main():
     global ZIP_SEMAPHORE
     if not all([os.environ.get("API_ID"), os.environ.get("API_HASH"), os.environ.get("BOT_TOKEN")]):
         raise RuntimeError("API_ID, API_HASH, BOT_TOKEN to'ldirilmagan!")
@@ -2400,13 +2409,9 @@ async def main():
 
     print(f"[BOT] Tayyorlanmoqda... Kanallar: {len(required_channels)}")
     threading.Thread(target=keep_alive, daemon=True).start()
-
-    await app.start()
     print("[BOT] Ishga tushdi!")
-    asyncio.create_task(premium_expiry_notifier())
-    await idle()
-    await app.stop()
+    app.run()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
