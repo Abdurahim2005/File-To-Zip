@@ -40,10 +40,6 @@ user_welcome_msg:    dict = {}
 user_auto_zip:       dict = {}
 user_debounce:       dict = {}
 user_downloading:    dict = {}
-user_reserved_bytes: dict = {}   # fix3: parallel yuklanayotgan fayllar hajmi
-user_excess:         dict = {}   # fix2: 25ta limitdan oshgan fayllar soni
-user_limit_debounce: dict = {}   # fix1: kunlik limit xabari uchun debounce
-user_storage_rej:    dict = {}   # fix3: hajm limitidan rad etilgan fayllar soni
 required_channels:   dict = {}
 
 # ZIP navbat semafori — bir vaqtda max 2 ta ZIP jarayoni
@@ -314,9 +310,8 @@ TEXTS = {
             "Ertaga yana foydalanishingiz mumkin! 😊"
         ),
         "join_required": (
-            "👋 Botdan foydalanish uchun\n"
-            "quyidagi kanal(lar)ga obuna bo'ling:\n\n"
-            "✅ Obuna bo'lgach «Tekshirish» tugmasini bosing."
+            "👋 Botdan foydalanish uchun\nquyidagi kanal(lar)ga obuna bo'ling:\n\n"
+            "{channels}\n\n✅ Obuna bo'lgach «Tekshirish» tugmasini bosing."
         ),
         "join_check_btn": "✅ Tekshirish",
         "join_ok":        "✅ Obuna tasdiqlandi!",
@@ -395,9 +390,8 @@ TEXTS = {
             "Come back tomorrow! 😊"
         ),
         "join_required": (
-            "👋 To use this bot, please join\n"
-            "the following channel(s):\n\n"
-            "✅ After joining, press «Check» button."
+            "👋 To use this bot, please join\nthe following channel(s):\n\n"
+            "{channels}\n\n✅ After joining, press «Check» button."
         ),
         "join_check_btn": "✅ Check",
         "join_ok":        "✅ Subscription confirmed!",
@@ -571,78 +565,47 @@ async def error_to_admin(client, context: str, uid: int, err: Exception):
 # ════════════════════════════════════════════════════════════
 async def check_subscription(client, uid: int) -> list:
     not_joined = []
-    # global required_channels — agar u tashqarida bo'lsa
     for chat_id, title in required_channels.items():
         try:
-            # Telegram ID'lari har doim integer bo'lishi shart!
-            member = await client.get_chat_member(int(chat_id), uid)
-            
-            # Faqatgina ushbu statusdagilar obuna bo'lgan hisoblanadi
-            is_member = member.status in [
-                enums.ChatMemberStatus.OWNER,
-                enums.ChatMemberStatus.ADMINISTRATOR,
-                enums.ChatMemberStatus.MEMBER
-            ]
-            
-            if not is_member:
+            member = await client.get_chat_member(chat_id, uid)
+            if member.status in (enums.ChatMemberStatus.BANNED, enums.ChatMemberStatus.LEFT):
                 not_joined.append((chat_id, title))
-        except Exception as e:
-            # Agar bot kanalda admin bo'lmasa, u get_chat_member qila olmaydi va bu yerga tushadi
-            print(f"Obuna tekshirishda xato ({title}): {e}")
-            not_joined.append((chat_id, title))
+        except Exception:
+            pass
     return not_joined
 
 async def gate_check(client, uid: int, chat_id: int, lang: str) -> bool:
     if not required_channels:
         return True
-        
     not_joined = await check_subscription(client, uid)
     if not not_joined:
         return True
-
-    texts = TEXTS.get(lang, TEXTS["uz"])
-    buttons = []
-
+    lines, buttons = [], []
     for cid, title in not_joined:
-        # Linkni aniqlash mantiqi
-        link = "https://t.me/duv_dev" # Default (yoki biror zaxira link)
         try:
-            chat = await client.get_chat(int(cid))
+            chat = await client.get_chat(cid)
             if chat.username:
-                link = f"https://t.me/{chat.username}"
+                lines.append(f"• [{title}](https://t.me/{chat.username})")
+                buttons.append([InlineKeyboardButton(f"📢 {title}", url=f"https://t.me/{chat.username}")])
             else:
-                # Shaxsiy kanal bo'lsa, invite linkni olishga urinamiz
-                invite = await client.export_chat_invite_link(int(cid))
-                link = invite
+                lines.append(f"• {title} _(so'rov yuboriladi)_")
+                try:
+                    await client.join_chat(cid)
+                except Exception:
+                    pass
         except Exception:
-            # Agar hammasi xato bo'lsa, bazadagi ID ni tekshiring
-            pass
-            
-        buttons.append([InlineKeyboardButton(f"📢 {title}", url=link)])
-
+            lines.append(f"• {title}")
+    texts = TEXTS.get(lang, TEXTS["uz"])
     buttons.append([InlineKeyboardButton(texts["join_check_btn"], callback_data="check_join")])
-
     await client.send_message(
         chat_id,
-        texts["join_required"],
+        texts["join_required"].format(channels="\n".join(lines)),
         parse_mode=enums.ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup(buttons),
         disable_web_page_preview=True,
     )
     return False
-@app.on_callback_query(filters.regex("^check_join$"))
-async def on_check_join(client, callback_query):
-    uid = callback_query.from_user.id
-    lang = get_lang(uid) or "uz"
-    
-    not_joined = await check_subscription(client, uid)
-    
-    if not not_joined:
-        await callback_query.answer("✅ Rahmat, obuna tasdiqlandi!", show_alert=True)
-        await callback_query.message.delete()
-        # Bu yerda foydalanuvchi to'xtagan joyidan davom etishi uchun funksiyani chaqiring
-    else:
-        await callback_query.answer("❌ Hali ham hamma kanallarga obuna bo'lmagansiz!", show_alert=True)
+
 # ════════════════════════════════════════════════════════════
 #  TASK HELPERS
 # ════════════════════════════════════════════════════════════
@@ -692,54 +655,6 @@ async def _send_status(client, chat_id: int, uid: int):
 def restart_debounce(client, chat_id: int, uid: int):
     schedule_task(user_debounce, uid, _send_status(client, chat_id, uid))
 
-# ── Kunlik limit xabari debounce ─────────────────────────
-async def _send_daily_limit_msg(client, chat_id: int, uid: int):
-    """2 soniya kutib bitta limit xabari yuborish"""
-    await asyncio.sleep(2.0)
-    sm = user_status_msg.pop(uid, None)
-    await safe_delete(sm)
-    await client.send_message(
-        chat_id, tx(uid, "daily_limit"),
-        parse_mode=enums.ParseMode.MARKDOWN,
-    )
-
-def schedule_limit_msg(client, chat_id: int, uid: int):
-    schedule_task(user_limit_debounce, uid, _send_daily_limit_msg(client, chat_id, uid))
-
-# ── Oshiqcha fayl xabari debounce ────────────────────────
-async def _send_excess_msg(client, chat_id: int, uid: int):
-    """1.5 soniya kutib: qabul qilindi + oshiqchalari rad xabari"""
-    await asyncio.sleep(DEBOUNCE_SEC)
-    accepted = file_count(uid)
-    rejected = user_excess.pop(uid, 0)
-    if accepted == 0:
-        return
-    sm  = user_status_msg.get(uid)
-    lang = get_lang(uid) or "uz"
-    if lang == "uz":
-        text = (f"✅ *{accepted} ta fayl* qabul qilindi!\n"
-                f"❌ *{rejected} ta fayl* qabul qilinmadi (25 ta limit).\n\n"
-                f"👇 ZIP yasash tugmasini bosing:")
-    else:
-        text = (f"✅ *{accepted} file(s)* received!\n"
-                f"❌ *{rejected} file(s)* rejected (25 file limit).\n\n"
-                f"👇 Press Create ZIP when ready:")
-    markup = InlineKeyboardMarkup([[
-        InlineKeyboardButton(tx(uid, "ready_btn"), callback_data="zip_now")
-    ]])
-    if sm is None:
-        try:
-            sent = await client.send_message(chat_id, text,
-                       parse_mode=enums.ParseMode.MARKDOWN, reply_markup=markup)
-            user_status_msg[uid] = sent
-        except Exception:
-            pass
-    else:
-        try:
-            await sm.edit_text(text, parse_mode=enums.ParseMode.MARKDOWN, reply_markup=markup)
-        except Exception:
-            pass
-
 # ════════════════════════════════════════════════════════════
 #  AUTO-ZIP TIMER
 # ════════════════════════════════════════════════════════════
@@ -761,13 +676,13 @@ def start_auto_zip(client, chat_id: int, uid: int,
 #  ZIP YARATISH  (Queue + STORED compression)
 # ════════════════════════════════════════════════════════════
 async def create_and_send_zip(client, chat_id: int, uid: int,
-                               zip_name_raw: str, auto: bool = False):
-    # 1. SEMAFORNI TEKSHIRISH VA YARATISH (Eng muhim tuzatish!)
+                             zip_name_raw: str, auto: bool = False):
+    # 1. Global semaforni funksiya boshida sozlaymiz (Sintaksis xatosi tuzatildi)
     global ZIP_SEMAPHORE
     if ZIP_SEMAPHORE is None:
-        ZIP_SEMAPHORE = asyncio.Semaphore(2) # Bir vaqtda max 2 kishi uchun navbat
+        ZIP_SEMAPHORE = asyncio.Semaphore(2)
 
-    udir  = user_dir(uid)
+    udir = user_dir(uid)
     files = [f for f in os.listdir(udir) if os.path.isfile(os.path.join(udir, f))]
     if not files:
         return
@@ -775,73 +690,77 @@ async def create_and_send_zip(client, chat_id: int, uid: int,
     zip_name = f"{zip_name_raw}.zip"
     zip_path = os.path.join(udir, zip_name)
 
-    # Mavjud status xabarini "ZIP qilinmoqda" ga aylantirish yoki yangi yuborish
+    # 2. Status xabarini tayyorlash
     existing_sm = user_status_msg.get(uid)
+    progress = None
     if existing_sm:
         try:
-            await existing_sm.edit_text(tx(uid, "creating_zip"),
-                                         parse_mode=enums.ParseMode.MARKDOWN)
+            progress = await existing_sm.edit_text(tx(uid, "creating_zip"),
+                                                 parse_mode=enums.ParseMode.MARKDOWN)
         except Exception:
             existing_sm = None
 
     if not existing_sm:
         progress = await client.send_message(
             chat_id, tx(uid, "creating_zip"), parse_mode=enums.ParseMode.MARKDOWN)
-    else:
-        progress = None
 
-    # ── NAVBAT (Queue) ──
+    # 3. Navbatni tekshirish (Semafor locked bo'lsa xabar berish)
     queue_msg = None
     if ZIP_SEMAPHORE.locked():
         queue_msg = await client.send_message(
             chat_id, tx(uid, "zip_queue"), parse_mode=enums.ParseMode.MARKDOWN)
 
+    # 4. ZIP jarayoni (Navbat tizimi bilan)
     async with ZIP_SEMAPHORE:
-        # Navbat kelganda kutish xabarini o'chiramiz
+        # Navbat xabarini o'chirish (agar bo'lsa)
         if queue_msg:
             await safe_delete(queue_msg)
             
         fcount = len(files)
         try:
-            # ZIP_STORED — siqmasdan, CPU yuklama minimal
+            # ZIP_STORED — CPU yuklamasini kamaytirish uchun siqmasdan arxivlash
             with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_STORED) as zf:
                 for fname in files:
                     fpath = os.path.join(udir, fname)
+                    # ZIP faylning o'zini o'ziga qo'shib qo'ymaslik uchun tekshiruv
                     if os.path.isfile(fpath) and fname != zip_name:
                         zf.write(fpath, arcname=fname)
 
             zip_size = os.path.getsize(zip_path) if os.path.exists(zip_path) else 0
-            caption  = tx(uid, "zip_caption")
+            caption = tx(uid, "zip_caption")
             if auto:
                 caption = tx(uid, "auto_zip_done") + "\n\n" + caption
 
+            # Faylni yuborish
             await client.send_document(
                 chat_id, zip_path,
                 caption=caption, file_name=zip_name,
                 parse_mode=enums.ParseMode.MARKDOWN,
             )
-            # Statistikaga yozish
+            
+            # Statistika
             add_zip_stat(uid, zip_size / 1024 / 1024, fcount)
 
         except Exception as e:
             await client.send_message(chat_id, tx(uid, "zip_error"),
-                                       parse_mode=enums.ParseMode.MARKDOWN)
+                                     parse_mode=enums.ParseMode.MARKDOWN)
             await error_to_admin(client, "create_and_send_zip", uid, e)
             return
         finally:
+            # Xabarlarni tozalash (Progress va statuslarni o'chirish)
             await safe_delete(progress)
             sm = user_status_msg.pop(uid, None)
             await safe_delete(sm)
             wm = user_welcome_msg.pop(uid, None)
             await safe_delete(wm)
 
-    # Tozalash
-    try:
-        if os.path.exists(udir):
-            shutil.rmtree(udir)
-            os.makedirs(udir, exist_ok=True)
-    except Exception as e:
-        print(f"[cleanup] {e}")
+            # 5. Tozalash (Juda muhim: Railway diski to'lib qolmasligi uchun)
+            try:
+                if os.path.exists(udir):
+                    shutil.rmtree(udir)
+                    os.makedirs(udir, exist_ok=True)
+            except Exception as e:
+                print(f"[cleanup error] {uid}: {e}")
 
     user_auto_zip.pop(uid, None)
 
@@ -855,74 +774,57 @@ async def receive_file(client, message: Message, obj, filename: str):
         await safe_delete(message)
         return
 
-    # FIX4: Obuna tekshiruvi
     lang = get_lang(uid) or "uz"
     if not await gate_check(client, uid, message.chat.id, lang):
         await safe_delete(message)
         return
 
-    # FIX1: Kunlik limit — hech qanday fayl qabul qilinmaydi
-    if get_daily_zip_count(uid) >= MAX_ZIPS_DAY:
-        await safe_delete(message)
-        schedule_limit_msg(client, message.chat.id, uid)
-        return
-
     fsize    = getattr(obj, "file_size", 0) or 0
-    # FIX3: Haqiqiy ishlatilgan joy = disk + hozir yuklanayotganlar
-    used_now = disk_used(uid) + user_reserved_bytes.get(uid, 0)
-    cur_cnt  = file_count(uid) + user_downloading.get(uid, 0)
+    used_now = disk_used(uid)
+    cur_cnt  = file_count(uid)
 
-    # FIX2: 25 ta fayl soni cheklovi — oshiqchasini o'chirib debounce
+    # Fayl soni cheklovi
     if cur_cnt >= MAX_FILES:
         await safe_delete(message)
-        user_excess[uid] = user_excess.get(uid, 0) + 1
-        schedule_task(user_debounce, uid, _send_excess_msg(client, message.chat.id, uid))
+        sm = user_status_msg.pop(uid, None)
+        await safe_delete(sm)
+        sfm = await client.send_message(
+            message.chat.id,
+            tx(uid, "max_files"),
+            parse_mode=enums.ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton(tx(uid, "ready_btn"), callback_data="zip_now")
+            ]])
+        )
+        user_status_msg[uid] = sfm
+        await cancel_task(user_auto_zip, uid)
+        start_auto_zip(client, message.chat.id, uid, delay=90, user_obj=message.from_user)
         return
 
-    # FIX3: Xotira cheklovi — rad etilgan fayllarni sanab xabar berish
+    # Xotira cheklovi
     if used_now + fsize > MAX_STORAGE:
         await safe_delete(message)
-        user_storage_rej[uid] = user_storage_rej.get(uid, 0) + 1
-        # Debounce — bitta xabar
-        async def _send_storage_full_msg(chat_id, u):
-            await asyncio.sleep(DEBOUNCE_SEC)
-            rej_cnt = user_storage_rej.pop(u, 0)
-            udir    = user_dir(u)
-            flist   = [f for f in os.listdir(udir) if os.path.isfile(os.path.join(udir, f))]
-            acc_cnt = len(flist)
-            lang_u  = get_lang(u) or "uz"
-            if lang_u == "uz":
-                text = (f"⚠️ *Xotira to'lib qoldi!*\n\n"
-                        f"✅ Qabul qilindi: *{acc_cnt} ta fayl*\n"
-                        f"❌ Qabul qilinmadi: *{rej_cnt} ta fayl*\n"
-                        f"💾 Band: *{fmt_size(used_now)}* / *{fmt_size(MAX_STORAGE)}*\n\n"
-                        f"ZIP yasash tugmasini bosing — 40 soniyada avto-zip.")
-            else:
-                text = (f"⚠️ *Storage full!*\n\n"
-                        f"✅ Accepted: *{acc_cnt} file(s)*\n"
-                        f"❌ Rejected: *{rej_cnt} file(s)*\n"
-                        f"💾 Used: *{fmt_size(used_now)}* of *{fmt_size(MAX_STORAGE)}*\n\n"
-                        f"Press Create ZIP — auto-zip in 40 seconds.")
-            sm = user_status_msg.pop(u, None)
-            await safe_delete(sm)
-            sfm = await client.send_message(
-                chat_id, text,
-                parse_mode=enums.ParseMode.MARKDOWN,
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton(tx(u, "ready_btn"), callback_data="zip_now")
-                ]])
-            )
-            user_status_msg[u] = sfm
-            await cancel_task(user_auto_zip, u)
-            start_auto_zip(client, chat_id, u, delay=40, user_obj=None)
-
-        schedule_task(user_debounce, uid,
-                      _send_storage_full_msg(message.chat.id, uid))
+        udir    = user_dir(uid)
+        flist   = [f for f in os.listdir(udir) if os.path.isfile(os.path.join(udir, f))]
+        last_fn = flist[-1] if flist else "—"
+        sm = user_status_msg.pop(uid, None)
+        await safe_delete(sm)
+        sfm = await client.send_message(
+            message.chat.id,
+            tx(uid, "storage_full", last_file=last_fn,
+               used=fmt_size(used_now), max=fmt_size(MAX_STORAGE)),
+            parse_mode=enums.ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton(tx(uid, "ready_btn"), callback_data="zip_now")
+            ]])
+        )
+        user_status_msg[uid] = sfm
+        await cancel_task(user_auto_zip, uid)
+        start_auto_zip(client, message.chat.id, uid, delay=40, user_obj=message.from_user)
         return
 
-    # FIX3: Yuklanayotgan hajmni rezerv qilamiz
-    user_reserved_bytes[uid] = user_reserved_bytes.get(uid, 0) + fsize
-    user_downloading[uid]    = user_downloading.get(uid, 0) + 1
+    # Yuklanayotganlar
+    user_downloading[uid] = user_downloading.get(uid, 0) + 1
     restart_debounce(client, message.chat.id, uid)
 
     udir      = user_dir(uid)
@@ -933,8 +835,7 @@ async def receive_file(client, message: Message, obj, filename: str):
     except Exception as e:
         await error_to_admin(client, "receive_file→download", uid, e)
     finally:
-        user_downloading[uid]    = max(0, user_downloading.get(uid, 1) - 1)
-        user_reserved_bytes[uid] = max(0, user_reserved_bytes.get(uid, fsize) - fsize)
+        user_downloading[uid] = max(0, user_downloading.get(uid, 1) - 1)
 
     await safe_delete(message)
     restart_debounce(client, message.chat.id, uid)
@@ -990,9 +891,6 @@ async def cb_set_lang(client, call):
     user_welcome_msg[uid] = sent
     await send_sticker(client, call.message.chat.id, "start")
     await call.answer(TEXTS[lang]["lang_set"])
-    # FIX4: Til tanlangandan keyin darhol obuna tekshiruvi
-    if required_channels:
-        await gate_check(client, uid, call.message.chat.id, lang)
 
 @app.on_callback_query(filters.create(lambda _, __, q: q.data == "change_lang"))
 async def cb_change_lang(client, call):
@@ -1580,26 +1478,15 @@ def keep_alive():
 #  MAIN
 # ════════════════════════════════════════════════════════════
 if __name__ == "__main__":
-    # 1. Konfiguratsiyani tekshirish
     if not all([os.environ.get("API_ID"), os.environ.get("API_HASH"), os.environ.get("BOT_TOKEN")]):
         raise RuntimeError("API_ID, API_HASH, BOT_TOKEN to'ldirilmagan!")
-    
-    # 2. Bazani va kanallarni yuklash
     get_db()
     init_db()
     _load_channels()
-    
-    # 3. Papkalarni yaratish
+    ZIP_SEMAPHORE = asyncio.Semaphore(2)
+    ch_count = len(required_channels)
+    print(f"[BOT] Ishga tushdi | Kanallar: {ch_count}")
     os.makedirs(BASE_DIR,    exist_ok=True)
     os.makedirs(STICKER_DIR, exist_ok=True)
-    
-    print(f"[BOT] Tayyorlanmoqda... Kanallar: {len(required_channels)}")
-    
-    # 4. Keep-alive (Flask) ni alohida potokda yoqish
     threading.Thread(target=keep_alive, daemon=True).start()
-    
-    # 5. Botni ishga tushirish
-    # DIQQAT: ZIP_SEMAPHORE bu yerda yaratilmaydi! 
-    # U create_and_send_zip funksiyasi ichida yoki @app.on_start da yaratiladi.
-    print("[BOT] Ishga tushdi!")
     app.run()
