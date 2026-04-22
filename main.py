@@ -571,42 +571,54 @@ async def error_to_admin(client, context: str, uid: int, err: Exception):
 # ════════════════════════════════════════════════════════════
 async def check_subscription(client, uid: int) -> list:
     not_joined = []
+    # global required_channels — agar u tashqarida bo'lsa
     for chat_id, title in required_channels.items():
         try:
-            member = await client.get_chat_member(chat_id, uid)
-            if member.status in (enums.ChatMemberStatus.BANNED, enums.ChatMemberStatus.LEFT):
+            # Telegram ID'lari har doim integer bo'lishi shart!
+            member = await client.get_chat_member(int(chat_id), uid)
+            
+            # Faqatgina ushbu statusdagilar obuna bo'lgan hisoblanadi
+            is_member = member.status in [
+                enums.ChatMemberStatus.OWNER,
+                enums.ChatMemberStatus.ADMINISTRATOR,
+                enums.ChatMemberStatus.MEMBER
+            ]
+            
+            if not is_member:
                 not_joined.append((chat_id, title))
-        except Exception:
-            # Bot kanalda admin emas yoki foydalanuvchi topilmadi — obuna emas deb hisoblanadi
+        except Exception as e:
+            # Agar bot kanalda admin bo'lmasa, u get_chat_member qila olmaydi va bu yerga tushadi
+            print(f"Obuna tekshirishda xato ({title}): {e}")
             not_joined.append((chat_id, title))
     return not_joined
 
 async def gate_check(client, uid: int, chat_id: int, lang: str) -> bool:
     if not required_channels:
         return True
+        
     not_joined = await check_subscription(client, uid)
     if not not_joined:
         return True
 
-    texts   = TEXTS.get(lang, TEXTS["uz"])
+    texts = TEXTS.get(lang, TEXTS["uz"])
     buttons = []
 
     for cid, title in not_joined:
+        # Linkni aniqlash mantiqi
+        link = "https://t.me/duv_dev" # Default (yoki biror zaxira link)
         try:
-            chat = await client.get_chat(cid)
+            chat = await client.get_chat(int(cid))
             if chat.username:
-                buttons.append([InlineKeyboardButton(
-                    f"📢 {title}", url=f"https://t.me/{chat.username}"
-                )])
+                link = f"https://t.me/{chat.username}"
             else:
-                # Shaxsiy kanal — invite link orqali
-                try:
-                    invite = await client.export_chat_invite_link(cid)
-                    buttons.append([InlineKeyboardButton(f"📢 {title}", url=invite)])
-                except Exception:
-                    buttons.append([InlineKeyboardButton(f"📢 {title}", url="https://t.me")])
+                # Shaxsiy kanal bo'lsa, invite linkni olishga urinamiz
+                invite = await client.export_chat_invite_link(int(cid))
+                link = invite
         except Exception:
-            buttons.append([InlineKeyboardButton(f"📢 {title}", url="https://t.me")])
+            # Agar hammasi xato bo'lsa, bazadagi ID ni tekshiring
+            pass
+            
+        buttons.append([InlineKeyboardButton(f"📢 {title}", url=link)])
 
     buttons.append([InlineKeyboardButton(texts["join_check_btn"], callback_data="check_join")])
 
@@ -618,7 +630,19 @@ async def gate_check(client, uid: int, chat_id: int, lang: str) -> bool:
         disable_web_page_preview=True,
     )
     return False
-
+@app.on_callback_query(filters.regex("^check_join$"))
+async def on_check_join(client, callback_query):
+    uid = callback_query.from_user.id
+    lang = get_lang(uid) or "uz"
+    
+    not_joined = await check_subscription(client, uid)
+    
+    if not not_joined:
+        await callback_query.answer("✅ Rahmat, obuna tasdiqlandi!", show_alert=True)
+        await callback_query.message.delete()
+        # Bu yerda foydalanuvchi to'xtagan joyidan davom etishi uchun funksiyani chaqiring
+    else:
+        await callback_query.answer("❌ Hali ham hamma kanallarga obuna bo'lmagansiz!", show_alert=True)
 # ════════════════════════════════════════════════════════════
 #  TASK HELPERS
 # ════════════════════════════════════════════════════════════
