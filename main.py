@@ -314,8 +314,9 @@ TEXTS = {
             "Ertaga yana foydalanishingiz mumkin! 😊"
         ),
         "join_required": (
-            "👋 Botdan foydalanish uchun\nquyidagi kanal(lar)ga obuna bo'ling:\n\n"
-            "{channels}\n\n✅ Obuna bo'lgach «Tekshirish» tugmasini bosing."
+            "👋 Botdan foydalanish uchun\n"
+            "quyidagi kanal(lar)ga obuna bo'ling:\n\n"
+            "✅ Obuna bo'lgach «Tekshirish» tugmasini bosing."
         ),
         "join_check_btn": "✅ Tekshirish",
         "join_ok":        "✅ Obuna tasdiqlandi!",
@@ -394,8 +395,9 @@ TEXTS = {
             "Come back tomorrow! 😊"
         ),
         "join_required": (
-            "👋 To use this bot, please join\nthe following channel(s):\n\n"
-            "{channels}\n\n✅ After joining, press «Check» button."
+            "👋 To use this bot, please join\n"
+            "the following channel(s):\n\n"
+            "✅ After joining, press «Check» button."
         ),
         "join_check_btn": "✅ Check",
         "join_ok":        "✅ Subscription confirmed!",
@@ -585,26 +587,32 @@ async def gate_check(client, uid: int, chat_id: int, lang: str) -> bool:
     not_joined = await check_subscription(client, uid)
     if not not_joined:
         return True
-    lines, buttons = [], []
+
+    texts   = TEXTS.get(lang, TEXTS["uz"])
+    buttons = []
+
     for cid, title in not_joined:
         try:
             chat = await client.get_chat(cid)
             if chat.username:
-                lines.append(f"• [{title}](https://t.me/{chat.username})")
-                buttons.append([InlineKeyboardButton(f"📢 {title}", url=f"https://t.me/{chat.username}")])
+                buttons.append([InlineKeyboardButton(
+                    f"📢 {title}", url=f"https://t.me/{chat.username}"
+                )])
             else:
-                lines.append(f"• {title} _(so'rov yuboriladi)_")
+                # Shaxsiy kanal — invite link orqali
                 try:
-                    await client.join_chat(cid)
+                    invite = await client.export_chat_invite_link(cid)
+                    buttons.append([InlineKeyboardButton(f"📢 {title}", url=invite)])
                 except Exception:
-                    pass
+                    buttons.append([InlineKeyboardButton(f"📢 {title}", url="https://t.me")])
         except Exception:
-            lines.append(f"• {title}")
-    texts = TEXTS.get(lang, TEXTS["uz"])
+            buttons.append([InlineKeyboardButton(f"📢 {title}", url="https://t.me")])
+
     buttons.append([InlineKeyboardButton(texts["join_check_btn"], callback_data="check_join")])
+
     await client.send_message(
         chat_id,
-        texts["join_required"].format(channels="\n".join(lines)),
+        texts["join_required"],
         parse_mode=enums.ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup(buttons),
         disable_web_page_preview=True,
