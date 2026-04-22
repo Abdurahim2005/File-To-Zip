@@ -730,6 +730,11 @@ def start_auto_zip(client, chat_id: int, uid: int,
 # ════════════════════════════════════════════════════════════
 async def create_and_send_zip(client, chat_id: int, uid: int,
                                zip_name_raw: str, auto: bool = False):
+    # 1. SEMAFORNI TEKSHIRISH VA YARATISH (Eng muhim tuzatish!)
+    global ZIP_SEMAPHORE
+    if ZIP_SEMAPHORE is None:
+        ZIP_SEMAPHORE = asyncio.Semaphore(2) # Bir vaqtda max 2 kishi uchun navbat
+
     udir  = user_dir(uid)
     files = [f for f in os.listdir(udir) if os.path.isfile(os.path.join(udir, f))]
     if not files:
@@ -755,12 +760,15 @@ async def create_and_send_zip(client, chat_id: int, uid: int,
 
     # ── NAVBAT (Queue) ──
     queue_msg = None
-    if ZIP_SEMAPHORE and ZIP_SEMAPHORE.locked():
+    if ZIP_SEMAPHORE.locked():
         queue_msg = await client.send_message(
             chat_id, tx(uid, "zip_queue"), parse_mode=enums.ParseMode.MARKDOWN)
 
     async with ZIP_SEMAPHORE:
-        await safe_delete(queue_msg)
+        # Navbat kelganda kutish xabarini o'chiramiz
+        if queue_msg:
+            await safe_delete(queue_msg)
+            
         fcount = len(files)
         try:
             # ZIP_STORED — siqmasdan, CPU yuklama minimal
@@ -797,8 +805,9 @@ async def create_and_send_zip(client, chat_id: int, uid: int,
 
     # Tozalash
     try:
-        shutil.rmtree(udir)
-        os.makedirs(udir, exist_ok=True)
+        if os.path.exists(udir):
+            shutil.rmtree(udir)
+            os.makedirs(udir, exist_ok=True)
     except Exception as e:
         print(f"[cleanup] {e}")
 
@@ -1539,16 +1548,26 @@ def keep_alive():
 #  MAIN
 # ════════════════════════════════════════════════════════════
 if __name__ == "__main__":
-    global ZIP_SEMAPHORE
+    # 1. Konfiguratsiyani tekshirish
     if not all([os.environ.get("API_ID"), os.environ.get("API_HASH"), os.environ.get("BOT_TOKEN")]):
         raise RuntimeError("API_ID, API_HASH, BOT_TOKEN to'ldirilmagan!")
+    
+    # 2. Bazani va kanallarni yuklash
     get_db()
     init_db()
     _load_channels()
-    ZIP_SEMAPHORE = asyncio.Semaphore(2)
-    ch_count = len(required_channels)
-    print(f"[BOT] Ishga tushdi | Kanallar: {ch_count}")
+    
+    # 3. Papkalarni yaratish
     os.makedirs(BASE_DIR,    exist_ok=True)
     os.makedirs(STICKER_DIR, exist_ok=True)
+    
+    print(f"[BOT] Tayyorlanmoqda... Kanallar: {len(required_channels)}")
+    
+    # 4. Keep-alive (Flask) ni alohida potokda yoqish
     threading.Thread(target=keep_alive, daemon=True).start()
+    
+    # 5. Botni ishga tushirish
+    # DIQQAT: ZIP_SEMAPHORE bu yerda yaratilmaydi! 
+    # U create_and_send_zip funksiyasi ichida yoki @app.on_start da yaratiladi.
+    print("[BOT] Ishga tushdi!")
     app.run()
