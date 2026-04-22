@@ -1736,7 +1736,6 @@
 #     print("[BOT] Ishga tushdi!")
 #     app.run()
 
-
 import os
 import re
 import shutil
@@ -1804,6 +1803,7 @@ ZIP_SEMAPHORE: asyncio.Semaphore = None
 required_channels: dict = {}
 user_status_msg: dict = {}
 user_welcome_msg: dict = {}
+user_join_msg: dict = {}
 user_auto_zip: dict = {}
 user_debounce: dict = {}
 user_downloading: dict = {}
@@ -2773,12 +2773,16 @@ async def gate_check(client, uid: int, chat_id: int, lang: str) -> bool:
 
     buttons.append([InlineKeyboardButton(texts["join_check_btn"], callback_data="check_join")])
 
-    await client.send_message(
+    old_join_msg = user_join_msg.pop(uid, None)
+    await safe_delete(old_join_msg)
+
+    sent = await client.send_message(
         chat_id,
         texts["join_required"],
         parse_mode=enums.ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup(buttons),
     )
+    user_join_msg[uid] = sent
     return False
 
 
@@ -3236,21 +3240,48 @@ async def cmd_start(client, message):
     await safe_delete(message)
     if is_banned(uid):
         return
-    if get_lang(uid) is None:
+
+    lang = get_lang(uid)
+    if lang is None:
         upsert_user(message.from_user, "uz")
-    sent = await client.send_message(
-        message.chat.id,
-        TEXTS["uz"]["choose_lang"],
-        reply_markup=InlineKeyboardMarkup(
-            [
+        sent = await client.send_message(
+            message.chat.id,
+            TEXTS["uz"]["choose_lang"],
+            reply_markup=InlineKeyboardMarkup(
                 [
-                    InlineKeyboardButton("🇺🇿 O'zbek", callback_data="setlang_uz"),
-                    InlineKeyboardButton("🇬🇧 English", callback_data="setlang_en"),
+                    [
+                        InlineKeyboardButton("🇺🇿 O'zbek", callback_data="setlang_uz"),
+                        InlineKeyboardButton("🇬🇧 English", callback_data="setlang_en"),
+                    ]
                 ]
-            ]
+            ),
+        )
+        user_welcome_msg[uid] = sent
+        return
+
+    upsert_user(message.from_user, lang)
+
+    old_welcome = user_welcome_msg.pop(uid, None)
+    await safe_delete(old_welcome)
+
+    welcome = await client.send_message(
+        message.chat.id,
+        tx(uid, "welcome", name=message.from_user.first_name or "User"),
+        parse_mode=enums.ParseMode.MARKDOWN,
+        reply_markup=InlineKeyboardMarkup(
+            [[InlineKeyboardButton(tx(uid, "change_lang"), callback_data="change_lang")]]
         ),
     )
-    user_welcome_msg[uid] = sent
+    user_welcome_msg[uid] = welcome
+
+    await client.send_message(
+        message.chat.id,
+        f"⭐ {tx(uid, 'premium_btn')}",
+        reply_markup=main_menu(uid),
+    )
+
+    if required_channels:
+        await gate_check(client, uid, message.chat.id, lang)
 
 
 @app.on_callback_query(filters.create(lambda _, __, q: q.data.startswith("setlang_")))
@@ -3308,6 +3339,8 @@ async def cb_check_join(client, call):
     if missing:
         await call.answer(TEXTS[lang]["join_fail"], show_alert=True)
     else:
+        user_join_msg.pop(uid, None)
+        await safe_delete(call.message)
         await call.answer(TEXTS[lang]["join_ok"], show_alert=True)
 
 
