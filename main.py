@@ -1,5 +1,3 @@
-
-
 import os
 import re
 import shutil
@@ -46,6 +44,7 @@ DEBOUNCE_SEC  = 1.5
 # ════════════════════════════════════════════════════════════
 #  IN-MEMORY STATE
 # ════════════════════════════════════════════════════════════
+processed_messages: set = set()   # ishlangan xabar ID lari
 broadcast_mode:      set  = set()
 waiting_for_user_id: dict = {}
 user_status_msg:     dict = {}
@@ -938,10 +937,17 @@ def start_auto_zip(client, chat_id: int, uid: int, delay: int = AUTO_ZIP_DELAY, 
 # ════════════════════════════════════════════════════════════
 async def receive_file(client, message: Message, obj, filename: str):
     uid = message.from_user.id
+    msg_id = message.id
+
 
     if is_banned(uid):
         await safe_delete(message)
         return
+    # Agar bu xabar avval ishlangan bo‘lsa, chiqib ket
+    global processed_messages
+    if msg_id in processed_messages:
+        return
+    processed_messages.add(msg_id)
 
     lang = get_lang(uid) or "uz"
     if not await gate_check(client, uid, message.chat.id, lang):
