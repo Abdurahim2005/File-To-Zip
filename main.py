@@ -37,7 +37,7 @@ DEFAULT_ZIPS_DAY      = ORIGINAL_MAX_ZIPS_DAY
 DEFAULT_STORAGE       = ORIGINAL_MAX_STORAGE
 DEFAULT_COMPRESSION   = ORIGINAL_COMPRESSION
 
-MAX_FILES     = 35
+MAX_FILES     = 20
 AUTO_ZIP_DELAY = 40
 DEBOUNCE_SEC  = 1.5
 
@@ -410,13 +410,13 @@ TEXTS = {
             "③ Tayyor! ZIP avtomatik yaratiladi.\n\n"
             "⏱ *40 soniya* ichida tugma bosilmasa — avtozip.\n\n"
             "📋 *Cheklovlar:*\n"
-            "• Max *25 ta fayl* (bir ZIP uchun)\n"
+            "• Max *{MAX_FILES} ta fayl* (bir ZIP uchun)\n"
             "• Max *300 MB* umumiy hajm\n"
             "• Kuniga *3 ta ZIP*"
         ),
         "files_saved":  "✅ *{count} ta fayl* qabul qilindi!\n\n👇 ZIP yasash tugmasini bosing:",
         "receiving":    "📥 *{count} ta fayl qabul qilinmoqda...* kutib turing",
-        "max_files":    "⛔ *Fayl cheklovi!*\n\nBir ZIP uchun maksimal *25 ta fayl*.\nHozirgi fayllarni avval ziplab oling.",
+        "max_files":    "⛔ *Fayl cheklovi!*\n\nBir ZIP uchun maksimal *{MAX_FILES} ta fayl*.\nHozirgi fayllarni avval ziplab oling.",
         "daily_limit":  "⛔ *Kunlik limit!*\n\nBugun *{limit} ta ZIP* limitingiz tugadi.\nErtaga yana foydalanishingiz mumkin! 😊",
         "join_required": "👋 Botdan foydalanish uchun\nquyidagi kanal(lar)ga obuna bo'ling:\n\n✅ Obuna bo'lgach «Tekshirish» tugmasini bosing.",
         "join_check_btn": "✅ Tekshirish",
@@ -439,7 +439,7 @@ TEXTS = {
             "☕ *Kofe sotib oling!*\n\n"
             "Botni rivojlantirish uchun istalgan miqdorda yordam bering.\n\n"
             "━━━━━━━━━━━━━━━\n"
-            "🇺🇿 *Uzcard:* `5614684903726220`\n"
+            "🇺🇿 *Uzcard:* `@Abduraxim0525`\n"
             "💳 *Visa:* `4916990318718514`\n\n"
             "🪙 *USDT (TRC20):*\n`TAs1YHxyz8tgYYTsDYPFqdtu9VxMjWPbKw`\n\n"
             "🪙 *USDT (BEP20 / PLASMA):*\n`0x10355140b54a53188c056a29e5973a40181b21ef`\n\n"
@@ -450,7 +450,7 @@ TEXTS = {
         "donate_done_btn":  "✅ Donat qildim",
         "donate_ask":       "💬 Donat miqdori va valyutasini yozing:\nMisol: `50000 UZS` yoki `5 USDT`",
         "donate_sent":      "✅ So'rovingiz qabul qilindi! Admin tez orada tasdiqlaydi. 🙏",
-        "top_donors":       "🏆 *Top Donorlar*\n\n{list}",
+        "top_donors":       "🏆 *Top Donatorlar*\n\n{list}",
         "no_donors":        "Hali hech kim donat qilmagan. Birinchi bo'ling! ☕",
         # Main keyboard buttons
         "btn_donate":       "💰 Donat",
@@ -500,13 +500,13 @@ TEXTS = {
             "③ Done! ZIP is created automatically.\n\n"
             "⏱ *Auto-zipped* after 40 seconds.\n\n"
             "📋 *Limits:*\n"
-            "• Max *25 files* per ZIP\n"
+            "• Max *{MAX_FILES} files* per ZIP\n"
             "• Max *300 MB* total size\n"
             "• *3 ZIPs* per day"
         ),
         "files_saved":  "✅ *{count} file(s)* received!\n\n👇 Press Create ZIP when ready:",
         "receiving":    "📥 *Receiving {count} file(s)...* please wait",
-        "max_files":    "⛔ *File limit reached!*\n\nMaximum *25 files* per ZIP.\nPlease ZIP current files first.",
+        "max_files":    "⛔ *File limit reached!*\n\nMaximum *{MAX_FILES} files* per ZIP.\nPlease ZIP current files first.",
         "daily_limit":  "⛔ *Daily limit reached!*\n\nYou've used *{limit} ZIPs* today.\nCome back tomorrow! 😊",
         "join_required": "👋 To use this bot, please join\nthe following channel(s):\n\n✅ After joining, press «Check» button.",
         "join_check_btn": "✅ Check",
