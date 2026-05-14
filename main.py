@@ -64,6 +64,10 @@ admin_reply_to:      dict = {}
 user_zip_naming:     dict = {}
 _user_file_locks:    dict = {}
 
+user_batch_timer:   dict = {}   # uid -> asyncio.Task (1.5 sekundlik taymer)
+user_receiving_msg: dict = {}   # uid -> "Qabul qilinmoqda..." xabari
+user_batch_active:  dict = {}   # uid -> True/False (qabul jarayoni faolmi)
+
 # Admin uchun siqish darajasi uchun vaqtinchalik saqlash
 admin_comp_target:   dict = {}
 
@@ -160,6 +164,14 @@ def init_db():
     # user_limits jadvaliga compression_level qo'shish agar eski bo'lsa
     try:
         c.execute("ALTER TABLE user_limits ADD COLUMN compression_level INTEGER DEFAULT 0")
+    except Exception:
+        pass
+    try:
+        c.execute("ALTER TABLE user_limits ADD COLUMN max_files_per_zip INTEGER DEFAULT 0")
+    except Exception:
+        pass
+    try:
+        c.execute("ALTER TABLE channels ADD COLUMN is_external INTEGER DEFAULT 0")
     except Exception:
         pass
 
@@ -304,23 +316,56 @@ def reset_user_limits(uid: int):
     c = get_db()
     c.execute("DELETE FROM user_limits WHERE telegram_id=?", (uid,))
     c.commit(); db_sync()
+    
+def get_user_max_files(uid: int) -> int:
+    """Foydalanuvchi uchun bir ZIPdagi maksimal fayl sonini qaytaradi."""
+    r = get_db().execute(
+        "SELECT max_files_per_zip FROM user_limits WHERE telegram_id=?", (uid,)
+    ).fetchone()
+    # Agar 0 yoki NULL bo‘lsa, global MAX_FILES qaytariladi
+    if r and r[0] and r[0] > 0:
+        return r[0]
+    return MAX_FILES
+
+def set_user_max_files(uid: int, limit: int):
+    """Foydalanuvchi uchun fayl soni limitini o‘rnatish."""
+    c = get_db()
+    existing = c.execute("SELECT telegram_id FROM user_limits WHERE telegram_id=?", (uid,)).fetchone()
+    if existing:
+        c.execute("UPDATE user_limits SET max_files_per_zip=? WHERE telegram_id=?", (limit, uid))
+    else:
+        c.execute("INSERT INTO user_limits(telegram_id,max_zips_day,max_storage_bytes,compression_level,max_files_per_zip) VALUES(?,?,?,?,?)",
+                  (uid, DEFAULT_ZIPS_DAY, DEFAULT_STORAGE, DEFAULT_COMPRESSION, limit))
+    c.commit(); db_sync()
+
+def set_all_users_max_files(limit: int):
+    """Hamma foydalanuvchilar uchun fayl limitini yangilash."""
+    c = get_db()
+    c.execute("UPDATE user_limits SET max_files_per_zip=?", (limit,))
+    global MAX_FILES
+    MAX_FILES = limit
+    c.commit(); db_sync()
 
 # ── Channels ─────────────────────────────────────────────
 def _load_channels():
     global required_channels
-    rows = get_db().execute("SELECT chat_id, title, username, invite_link FROM channels").fetchall()
-    required_channels = {
-        r[0]: {"title": r[1] or "", "username": (r[2] or "").lstrip("@"), "invite_link": r[3] or ""}
-        for r in rows
-    }
+    rows = get_db().execute("SELECT chat_id, title, username, invite_link, COALESCE(is_external,0) FROM channels").fetchall()
+    required_channels = {}
+    for r in rows:
+        required_channels[r[0]] = {
+            "title": r[1] or "",
+            "username": (r[2] or "").lstrip("@"),
+            "invite_link": r[3] or "",
+            "is_external": r[4]
+        }
 
-def add_channel(chat_id: int, title: str, username: str = "", invite_link: str = ""):
+def add_channel(chat_id: int, title: str, username: str = "", invite_link: str = "", is_external: int = 0):
     username = (username or "").lstrip("@")
     c = get_db()
-    c.execute("INSERT OR REPLACE INTO channels(chat_id,title,username,invite_link) VALUES(?,?,?,?)",
-              (chat_id, title, username, invite_link))
+    c.execute("INSERT OR REPLACE INTO channels(chat_id,title,username,invite_link,is_external) VALUES(?,?,?,?,?)",
+              (chat_id, title, username, invite_link, is_external))
     c.commit(); db_sync()
-    required_channels[chat_id] = {"title": title, "username": username, "invite_link": invite_link or ""}
+    required_channels[chat_id] = {"title": title, "username": username, "invite_link": invite_link, "is_external": is_external}
 
 def remove_channel(chat_id: int):
     c = get_db(); c.execute("DELETE FROM channels WHERE chat_id=?", (chat_id,))
@@ -410,13 +455,13 @@ TEXTS = {
             "③ Tayyor! ZIP avtomatik yaratiladi.\n\n"
             "⏱ *40 soniya* ichida tugma bosilmasa — avtozip.\n\n"
             "📋 *Cheklovlar:*\n"
-            "• Max *{MAX_FILES} ta fayl* (bir ZIP uchun)\n"
+            "• Max *{max_files} ta fayl* (bir ZIP uchun)\n"
             "• Max *300 MB* umumiy hajm\n"
             "• Kuniga *3 ta ZIP*"
         ),
         "files_saved":  "✅ *{count} ta fayl* qabul qilindi!\n\n👇 ZIP yasash tugmasini bosing:",
-        "receiving":    "📥 *{count} ta fayl qabul qilinmoqda...* kutib turing",
-        "max_files":    "⛔ *Fayl cheklovi!*\n\nBir ZIP uchun maksimal *{MAX_FILES} ta fayl*.\nHozirgi fayllarni avval ziplab oling.",
+        "receiving":    "📥 *Fayllar qabul qilinmoqda...*",
+        "max_files":    "⛔ *Fayl cheklovi!*\n\nBir ZIP uchun maksimal *{max_files} ta fayl*.\nHozirgi fayllarni avval ziplab oling.",
         "daily_limit":  "⛔ *Kunlik limit!*\n\nBugun *{limit} ta ZIP* limitingiz tugadi.\nErtaga yana foydalanishingiz mumkin! 😊",
         "join_required": "👋 Botdan foydalanish uchun\nquyidagi kanal(lar)ga obuna bo'ling:\n\n✅ Obuna bo'lgach «Tekshirish» tugmasini bosing.",
         "join_check_btn": "✅ Tekshirish",
@@ -500,13 +545,13 @@ TEXTS = {
             "③ Done! ZIP is created automatically.\n\n"
             "⏱ *Auto-zipped* after 40 seconds.\n\n"
             "📋 *Limits:*\n"
-            "• Max *{MAX_FILES} files* per ZIP\n"
+            "• Max *{max_files} files* per ZIP\n"
             "• Max *300 MB* total size\n"
             "• *3 ZIPs* per day"
         ),
         "files_saved":  "✅ *{count} file(s)* received!\n\n👇 Press Create ZIP when ready:",
-        "receiving":    "📥 *Receiving {count} file(s)...* please wait",
-        "max_files":    "⛔ *File limit reached!*\n\nMaximum *{MAX_FILES} files* per ZIP.\nPlease ZIP current files first.",
+        "receiving":    "📥 *Receiving files...*",
+        "max_files":    "⛔ *File limit reached!*\n\nMaximum *{max_files} files* per ZIP.\nPlease ZIP current files first.",
         "daily_limit":  "⛔ *Daily limit reached!*\n\nYou've used *{limit} ZIPs* today.\nCome back tomorrow! 😊",
         "join_required": "👋 To use this bot, please join\nthe following channel(s):\n\n✅ After joining, press «Check» button.",
         "join_check_btn": "✅ Check",
@@ -527,7 +572,7 @@ TEXTS = {
         "donate_text": (
             "☕ *Buy me a coffee!*\n\nSupport bot development with any amount.\n\n"
             "━━━━━━━━━━━━━━━\n"
-            "🇺🇿 *Uzcard:* `5614684903726220`\n"
+            "🇺🇿 *Uzcard:* `Hozircha yo'q,admin bilan bog'laning!`\n"
             "💳 *Visa:* `4916990318718514`\n\n"
             "🪙 *USDT (TRC20):*\n`TAs1YHxyz8tgYYTsDYPFqdtu9VxMjWPbKw`\n\n"
             "🪙 *USDT (BEP20 / PLASMA):*\n`0x10355140b54a53188c056a29e5973a40181b21ef`\n\n"
@@ -575,7 +620,9 @@ TEXTS = {
 def tx(uid: int, key: str, **kw) -> str:
     lang = get_lang(uid) or "uz"
     text = TEXTS.get(lang, TEXTS["uz"]).get(key, key)
-    return text.format(**kw) if kw else text
+    if 'max_files' not in kw:
+        kw['max_files'] = get_user_max_files(uid) if uid else MAX_FILES
+    return text.format(**kw)
 
 def main_keyboard(uid: int):
     lang = get_lang(uid) or "uz"
@@ -786,6 +833,8 @@ def get_user_file_lock(uid: int) -> asyncio.Lock:
 async def check_subscription(client, uid: int) -> list:
     not_joined = []
     for chat_id, info in required_channels.items():
+        if info.get("is_external", 0) == 1:
+            continue  # tashqi havolalar tekshirilmaydi
         refs = []
         username = (info.get("username") or "").lstrip("@")
         if username:
@@ -798,6 +847,8 @@ async def check_subscription(client, uid: int) -> list:
                 break
             except Exception:
                 continue
+        # Agar status LEFT yoki BANNED bo'lsa, qo'shilmagan hisoblanadi.
+        # PENDING (so'rov jo'natgan) holatida esa qo'shilgan deb qabul qilamiz.
         if member is None or member.status in (enums.ChatMemberStatus.BANNED, enums.ChatMemberStatus.LEFT):
             not_joined.append((chat_id, info))
     return not_joined
@@ -806,19 +857,35 @@ async def gate_check(client, uid: int, chat_id: int, lang: str) -> bool:
     if not required_channels:
         return True
     not_joined = await check_subscription(client, uid)
-    if not not_joined:
+    # Agar barcha tekshiriladigan kanallarga a'zo bo'lsa, True qaytaramiz
+    all_telegram_joined = True
+    for cid, info in required_channels.items():
+        if info.get("is_external", 0) == 0 and any(cid == x[0] for x in not_joined):
+            all_telegram_joined = False
+            break
+    if all_telegram_joined:
         return True
+
     texts = TEXTS.get(lang, TEXTS["uz"])
     buttons = []
-    for _, info in not_joined:
-        username = (info.get("username") or "").lstrip("@")
-        invite_link = info.get("invite_link") or ""
-        title = info.get("title") or "Kanal"
-        if username:
-            buttons.append([InlineKeyboardButton(f"📢 @{username}", url=f"https://t.me/{username}")])
-        elif invite_link:
-            buttons.append([InlineKeyboardButton(f"📢 {title}", url=invite_link)])
+    for cid, info in required_channels.items():
+        if info.get("is_external", 0) == 1:
+            # Tashqi havola – oddiy URL tugma
+            buttons.append([InlineKeyboardButton(f"🔗 {info['title']}", url=info.get("invite_link", "https://t.me"))])
+        else:
+            username = (info.get("username") or "").lstrip("@")
+            invite_link = info.get("invite_link") or ""
+            title = info.get("title") or "Kanal"
+            if username:
+                buttons.append([InlineKeyboardButton(f"📢 @{username}", url=f"https://t.me/{username}")])
+            elif invite_link:
+                buttons.append([InlineKeyboardButton(f"📢 {title}", url=invite_link)])
     buttons.append([InlineKeyboardButton(texts["join_check_btn"], callback_data="check_join")])
+
+    # Avvalgi obuna xabarlarini o‘chiramiz (agar mavjud bo‘lsa)
+    old_welcome = user_welcome_msg.pop(uid, None)
+    await safe_delete(old_welcome)
+
     await client.send_message(
         chat_id, texts["join_required"],
         parse_mode=enums.ParseMode.MARKDOWN,
@@ -850,28 +917,62 @@ def schedule_task(d: dict, uid: int, coro):
 # ════════════════════════════════════════════════════════════
 #  STATUS XABAR — debounce
 # ════════════════════════════════════════════════════════════
-async def _send_status(client, chat_id: int, uid: int):
-    await asyncio.sleep(DEBOUNCE_SEC)
-    cnt    = file_count(uid)
-    dl_cnt = user_downloading.get(uid, 0)
-    sm     = user_status_msg.get(uid)
+async def _send_final_status(client, chat_id: int, uid: int):
+    """Hamma fayl yuklab bo‘lingach yakuniy status xabarini yuborish."""
+    cnt = file_count(uid)
+    if cnt == 0:
+        return
+    text = tx(uid, "files_saved", count=cnt)
     markup = InlineKeyboardMarkup([[InlineKeyboardButton(tx(uid, "ready_btn"), callback_data="zip_now")]])
-    text   = tx(uid, "receiving", count=cnt + dl_cnt) if dl_cnt > 0 else tx(uid, "files_saved", count=cnt)
-    mup    = None if dl_cnt > 0 else markup
-    if sm is None:
-        try:
-            sent = await client.send_message(chat_id, text, parse_mode=enums.ParseMode.MARKDOWN, reply_markup=mup)
-            user_status_msg[uid] = sent
-        except Exception:
-            pass
-    else:
-        try:
-            await sm.edit_text(text, parse_mode=enums.ParseMode.MARKDOWN, reply_markup=mup)
-        except Exception:
-            pass
+    sm = await client.send_message(chat_id, text, parse_mode=enums.ParseMode.MARKDOWN, reply_markup=markup)
+    # Avvalgi status xabarini yangilash o‘rniga yangi xabar saqlanadi
+    user_status_msg[uid] = sm
 
-def restart_debounce(client, chat_id: int, uid: int):
-    schedule_task(user_debounce, uid, _send_status(client, chat_id, uid))
+async def _batch_timer_job(uid: int, chat_id: int, client):
+    """1.5 sekunddan so‘ng qabul qilinmoqda xabarini yuboradi."""
+    await asyncio.sleep(1.5)
+    # Agar hali ham yuklanayotgan fayllar bo‘lsa va xabar yuborilmagan bo‘lsa
+    if user_downloading.get(uid, 0) > 0 and not user_batch_active.get(uid, False):
+        text = tx(uid, "receiving", count="")  # "count" kerak emas, lekin matn bor
+        # aniq matn: "📥 *Fayllar qabul qilinmoqda...* kutib turing" (countsiz)
+        msg = await client.send_message(chat_id, text, parse_mode=enums.ParseMode.MARKDOWN)
+        user_receiving_msg[uid] = msg
+        user_batch_active[uid] = True
+    # Taymer o‘chiriladi
+    user_batch_timer.pop(uid, None)
+
+def schedule_batch_timer(uid: int, chat_id: int, client):
+    """Birinchi fayl kelganda yoki yangi to‘plam boshlanganda 1.5 sekundlik taymer ishga tushadi."""
+    # Avvalgi taymerni bekor qilamiz
+    old = user_batch_timer.pop(uid, None)
+    if old and not old.done():
+        old.cancel()
+    # Yangi taymer
+    task = asyncio.ensure_future(_batch_timer_job(uid, chat_id, client))
+    user_batch_timer[uid] = task
+
+async def check_batch_complete(client, uid: int, chat_id: int, user_obj):
+    """Har bir fayl yuklangach chaqiriladi. Agar yuklanayotgan fayl qolmagan bo‘lsa, yakuniy xabarni chiqaradi."""
+    if user_downloading.get(uid, 0) > 0:
+        return  # hali yuklanayotgan fayllar bor
+
+    # Batch tugadi – taymerni bekor qilamiz
+    t = user_batch_timer.pop(uid, None)
+    if t and not t.done():
+        t.cancel()
+
+    # "Qabul qilinmoqda..." xabarini o‘chiramiz
+    recv_msg = user_receiving_msg.pop(uid, None)
+    await safe_delete(recv_msg)
+
+    user_batch_active[uid] = False
+
+    # Yakuniy status xabarini yuboramiz
+    await _send_final_status(client, chat_id, uid)
+
+    # Avto-zip taymerini ishga tushiramiz
+    await cancel_task(user_auto_zip, uid)
+    start_auto_zip(client, chat_id, uid, user_obj=user_obj)
 
 # ... (qolgan funksiyalar avvalgidek, faqat kerakli yangi qismlar qo'shiladi) va qo'shildi ham men qo'shdim 
 async def _send_daily_limit_msg(client, chat_id: int, uid: int):
@@ -892,15 +993,17 @@ async def _send_excess_msg(client, chat_id: int, uid: int):
         return
     sm   = user_status_msg.get(uid)
     lang = get_lang(uid) or "uz"
+    user_max = get_user_max_files(uid)
     if lang == "uz":
         text = (f"✅ *{accepted} ta fayl* qabul qilindi!\n"
-                f"❌ *{rejected} ta fayl* qabul qilinmadi (25 ta limit).\n\n"
+                f"❌ *{rejected} ta fayl* qabul qilinmadi ({user_max} ta limit).\n\n"
                 f"👇 ZIP yasash tugmasini bosing:")
     else:
         text = (f"✅ *{accepted} file(s)* received!\n"
-                f"❌ *{rejected} file(s)* rejected (25 file limit).\n\n"
+                f"❌ *{rejected} file(s)* rejected ({user_max} file limit).\n\n"
                 f"👇 Press Create ZIP when ready:")
     markup = InlineKeyboardMarkup([[InlineKeyboardButton(tx(uid, "ready_btn"), callback_data="zip_now")]])
+
     if sm is None:
         try:
             sent = await client.send_message(chat_id, text, parse_mode=enums.ParseMode.MARKDOWN, reply_markup=markup)
@@ -953,7 +1056,6 @@ async def receive_file(client, message: Message, obj, filename: str):
         return
 
     max_zips, max_storage = get_user_limits(uid)
-
     if get_daily_zip_count(uid) >= max_zips:
         await safe_delete(message)
         schedule_limit_msg(client, message.chat.id, uid)
@@ -961,14 +1063,14 @@ async def receive_file(client, message: Message, obj, filename: str):
 
     fsize    = getattr(obj, "file_size", 0) or 0
     accepted = False
+    was_downloading = False
 
-    # ── Race-condition fix: per-user lock for accept/reject ──
     lock = get_user_file_lock(uid)
     async with lock:
         used_now = disk_used(uid) + user_reserved_bytes.get(uid, 0)
         cur_cnt  = file_count(uid) + user_downloading.get(uid, 0)
 
-        if cur_cnt >= MAX_FILES:
+        if cur_cnt >= get_user_max_files(uid):
             user_excess[uid] = user_excess.get(uid, 0) + 1
             schedule_task(user_debounce, uid, _send_excess_msg(client, message.chat.id, uid))
         elif used_now + fsize > max_storage:
@@ -1002,7 +1104,7 @@ async def receive_file(client, message: Message, obj, filename: str):
                 start_auto_zip(client, chat_id, u, delay=40, user_obj=None)
             schedule_task(user_debounce, uid, _send_storage_full_msg(message.chat.id, uid))
         else:
-            # Accept this file
+            was_downloading = user_downloading.get(uid, 0) > 0
             user_reserved_bytes[uid] = user_reserved_bytes.get(uid, 0) + fsize
             user_downloading[uid]    = user_downloading.get(uid, 0) + 1
             accepted = True
@@ -1011,8 +1113,23 @@ async def receive_file(client, message: Message, obj, filename: str):
         await safe_delete(message)
         return
 
-    restart_debounce(client, message.chat.id, uid)
+    # Yangi fayl kelganda oldingi jarayonlarni tozalaymiz
+    await cancel_task(user_auto_zip, uid)
+    sm_old = user_status_msg.pop(uid, None)
+    await safe_delete(sm_old)
+    recv_old = user_receiving_msg.pop(uid, None)
+    await safe_delete(recv_old)
+    user_batch_active.pop(uid, None)
 
+    # Birinchi fayl bo‘lsa 1.5 soniyalik taymer, aks holda agar taymer hali ishlamagan bo‘lsa yangilaymiz
+    if not was_downloading:
+        schedule_batch_timer(uid, message.chat.id, client)
+    else:
+        # Agar hali "qabul qilinmoqda" xabari chiqmagan bo‘lsa taymerni qayta ishga tushiramiz
+        if not user_batch_active.get(uid, False):
+            schedule_batch_timer(uid, message.chat.id, client)
+
+    # Faylni yuklash
     udir      = user_dir(uid)
     safe_name = sanitize_filename(filename)
     save_path = unique_path(udir, safe_name)
@@ -1024,13 +1141,9 @@ async def receive_file(client, message: Message, obj, filename: str):
         async with lock:
             user_downloading[uid]    = max(0, user_downloading.get(uid, 1) - 1)
             user_reserved_bytes[uid] = max(0, user_reserved_bytes.get(uid, fsize) - fsize)
+        await check_batch_complete(client, uid, message.chat.id, message.from_user)
 
     await safe_delete(message)
-    restart_debounce(client, message.chat.id, uid)
-
-    await cancel_task(user_auto_zip, uid)
-    start_auto_zip(client, message.chat.id, uid, user_obj=message.from_user)
-
 # ════════════════════════════════════════════════════════════
 #  BOT
 # ════════════════════════════════════════════════════════════
@@ -1104,7 +1217,7 @@ async def cb_set_lang(client, call):
     name = call.from_user.first_name or "Foydalanuvchi"
     sent = await client.send_message(
         call.message.chat.id,
-        TEXTS[lang]["welcome"].format(name=name),
+        tx(uid, "welcome", name=name),
         parse_mode=enums.ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup([[
             InlineKeyboardButton(TEXTS[lang]["change_lang"], callback_data="change_lang")
@@ -1146,6 +1259,7 @@ async def cb_check_join(client, call):
     not_joined = await check_subscription(client, uid)
     if not not_joined:
         await call.answer(TEXTS[lang]["join_ok"], show_alert=True)
+        await safe_delete(call.message)
     else:
         await call.answer(TEXTS[lang]["join_fail"], show_alert=True)
 # ❗ Eslatma: Barcha mavjud handlerlar, yordamchi funksiyalar va kod to'liqligicha saqlangan,
@@ -1429,31 +1543,71 @@ async def on_text(client, message):
         raw    = text
 
         if action == "add_channel":
-            normalized = raw.replace("https://t.me/","@").replace("http://t.me/","@").replace("t.me/","@")
-            try:
-                chat     = await client.get_chat(normalized)
-                username = (getattr(chat, "username", None) or "").lstrip("@")
-                invite_link = ""
-                if not username:
-                    try:
-                        invite_link = await client.export_chat_invite_link(chat.id)
-                    except Exception:
-                        pass
-                if not username and not invite_link:
-                    await message.reply("❌ Kanal public emas va invite link ham olinmadi.")
-                    return
-                add_channel(chat.id, chat.title or normalized, username=username, invite_link=invite_link)
-                warn = ""
+            raw_text = raw.strip()
+            # Agar chat_id kiritilgan bo'lsa (manfiy son bilan boshlansa)
+            if raw_text.startswith("-100"):
                 try:
-                    me = await client.get_me()
-                    await client.get_chat_member(chat.id, me.id)
+                    chat = await client.get_chat(int(raw_text))
+                    title = chat.title or raw_text
+                    username = (getattr(chat, "username", None) or "").lstrip("@")
+                    invite_link = ""
+                    if not username:
+                        try:
+                            invite_link = await client.export_chat_invite_link(chat.id)
+                        except Exception:
+                            pass
+                    add_channel(chat.id, title, username=username, invite_link=invite_link, is_external=0)
+                    await message.reply(f"✅ Kanal qo'shildi (ID orqali): *{title}*\n🆔 `{chat.id}`",
+                                        parse_mode=enums.ParseMode.MARKDOWN)
+                except Exception as e:
+                    await message.reply(f"❌ Xato: {e}")
+                return
+
+            # Telegram havolalari (t.me/...)
+            if raw_text.startswith("https://t.me/") or raw_text.startswith("http://t.me/") or raw_text.startswith("t.me/"):
+                # Avval oddiy get_chat bilan sinab ko'ramiz
+                normalized = raw_text.replace("https://t.me/","@").replace("http://t.me/","@").replace("t.me/","@")
+                try:
+                    chat = await client.get_chat(normalized)
+                    title = chat.title or normalized
+                    username = (getattr(chat, "username", None) or "").lstrip("@")
+                    invite_link = ""
+                    if not username:
+                        try:
+                            invite_link = await client.export_chat_invite_link(chat.id)
+                        except Exception:
+                            pass
+                    add_channel(chat.id, title, username=username, invite_link=invite_link, is_external=0)
+                    warn = ""
+                    try:
+                        me = await client.get_me()
+                        await client.get_chat_member(chat.id, me.id)
+                    except Exception:
+                        warn = "\n\n⚠️ Botni shu kanalga admin qiling."
+                    ref = f"@{username}" if username else invite_link
+                    await message.reply(f"✅ Kanal qo'shildi: *{title}*\n🔗 `{ref}`\n🆔 `{chat.id}`{warn}",
+                                        parse_mode=enums.ParseMode.MARKDOWN)
                 except Exception:
-                    warn = "\n\n⚠️ Botni shu kanalga admin qiling."
-                ref = f"@{username}" if username else invite_link
-                await message.reply(f"✅ Kanal qo'shildi: *{chat.title}*\n🔗 `{ref}`\n🆔 `{chat.id}`{warn}",
-                                    parse_mode=enums.ParseMode.MARKDOWN)
-            except Exception:
-                await message.reply("❌ Kanal topilmadi.", parse_mode=enums.ParseMode.MARKDOWN)
+                    # get_chat muvaffaqiyatsiz bo'lsa, bu maxfiy taklif havolasi bo'lishi mumkin (t.me/joinchat yoki t.me/+)
+                    try:
+                        # join_chat yordamida chat ma'lumotlarini olishga harakat qilamiz
+                        chat = await client.join_chat(raw_text)
+                        title = chat.title or raw_text
+                        username = ""
+                        invite_link = raw_text
+                        # Bot allaqachon kanalda admin bo'lsa, chat.id ni olish muvaffaqiyatli bo'ladi
+                        add_channel(chat.id, title, username=username, invite_link=invite_link, is_external=0)
+                        await message.reply(f"✅ Maxfiy kanal qo'shildi: *{title}*\n🔗 `{invite_link}`\n🆔 `{chat.id}`",
+                                            parse_mode=enums.ParseMode.MARKDOWN)
+                    except Exception as e2:
+                        # Unday bo'lmasa, tashqi havola sifatida saqlaymiz (tekshirilmaydi)
+                        add_channel(-abs(hash(raw_text)) % 1000000, raw_text, invite_link=raw_text, is_external=1)
+                        await message.reply(f"⚠️ Kanalga qo‘shila olmadim. Tashqi havola sifatida qo‘shildi (tekshirilmaydi): {raw_text}")
+                return
+
+            # Boshqa havolalar (Instagram, veb-sayt va h.k.)
+            add_channel(-abs(hash(raw_text)) % 1000000, raw_text, invite_link=raw_text, is_external=1)
+            await message.reply(f"✅ Tashqi havola qo‘shildi (tekshirilmaydi): {raw_text}")
             return
 
         if action == "confirm_donation":
@@ -1589,6 +1743,36 @@ async def on_text(client, message):
                 await message.reply("❌ Noto'g'ri ID.")
             return
 
+         # ═══════════════════════════════════════════════════
+        # YANGI: fayl limiti uchun qo‘shimchalar SHU YERGA
+        # ═══════════════════════════════════════════════════
+
+        if action == "set_file_limit":
+            parts = raw.split()
+            if len(parts) < 2:
+                await message.reply("❌ Format: `USER_ID LIMIT`")
+                return
+            try:
+                target_id = int(parts[0])
+                limit_val = int(parts[1])
+                set_user_max_files(target_id, limit_val)
+                await message.reply(f"✅ `{target_id}` uchun fayl limiti: *{limit_val}* ta")
+            except Exception:
+                await message.reply("❌ Xato. Format: `USER_ID LIMIT`")
+            return
+
+        if action == "set_all_file_limit":
+            try:
+                limit_val = int(raw)
+                set_all_users_max_files(limit_val)
+                await message.reply(f"✅ Hamma uchun fayl limiti: *{limit_val}* ta")
+            except Exception:
+                await message.reply("❌ Butun son yuboring")
+            return
+
+        # ═══════════════════════════════════════════════════
+        # YANGI QO‘SHIMCHALAR TUGADI
+        # ═══════════════════════════════════════════════════
         # Generic user lookup actions (ban, unban, info, clear)
         try:
             target_id = int(re.search(r"\d+", raw).group())
@@ -1788,8 +1972,8 @@ async def adm_disk(client, call):
 async def adm_channels(client, call):
     channels = get_channels()
     text = "📢 *Majburiy kanallar:*\n\n" + "\n".join(
-        f"• {info['title']} — `{'@'+info['username'] if info.get('username') else info.get('invite_link','—')}` (`{cid}`)"
-        for cid, info in channels.items()
+    f"• {info['title']} {'🔗' if info.get('is_external',0)==1 else '📢'} — `{info.get('invite_link','—')}` (`{cid}`)"
+    for cid, info in channels.items()
     ) if channels else "📢 Hozircha kanal qo'shilmagan."
     btns = [[InlineKeyboardButton(f"🗑 {info['title']} o'chirish", callback_data=f"adm_rmchan_{cid}")]
             for cid, info in channels.items()]
@@ -1878,6 +2062,8 @@ async def adm_limits(client, call):
             [InlineKeyboardButton("📦 Hamma uchun ZIP limiti", callback_data="adm_all_zip_limit"),
              InlineKeyboardButton("💾 Hamma uchun xotira limiti", callback_data="adm_all_storage_limit")],
             [InlineKeyboardButton("🔄 Hamma uchun standartga qaytarish", callback_data="adm_all_reset")],
+            [InlineKeyboardButton("📎 Foydalanuvchi fayl limiti", callback_data="adm_set_file_limit"),
+            InlineKeyboardButton("📎 Hamma uchun fayl limiti", callback_data="adm_all_file_limit")],
         ]),
     )
     await call.answer()
@@ -1960,6 +2146,20 @@ async def adm_all_storage_limit(client, call):
 async def cb_all_reset(client, call):
     reset_all_limits()
     await call.message.reply("✅ Hamma foydalanuvchi limitlari standartga qaytarildi.",
+                             parse_mode=enums.ParseMode.MARKDOWN)
+    await call.answer()
+
+@app.on_callback_query(admin_filter & filters.create(lambda _, __, q: q.data == "adm_set_file_limit"))
+async def adm_set_file_limit(client, call):
+    waiting_for_user_id[ADMIN_ID] = "set_file_limit"
+    await call.message.reply("📎 Fayl limitini o‘zgartirish uchun `USER_ID LIMIT` yuboring:\nMisol: `123456789 40`",
+                             parse_mode=enums.ParseMode.MARKDOWN)
+    await call.answer()
+
+@app.on_callback_query(admin_filter & filters.create(lambda _, __, q: q.data == "adm_all_file_limit"))
+async def adm_all_file_limit(client, call):
+    waiting_for_user_id[ADMIN_ID] = "set_all_file_limit"
+    await call.message.reply("📎 Hamma foydalanuvchilar uchun yangi fayl limitini yuboring (butun son):",
                              parse_mode=enums.ParseMode.MARKDOWN)
     await call.answer()
 #//////////////////////////////////////////////////////////////////////////////////////////
