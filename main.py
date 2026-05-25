@@ -28,7 +28,7 @@ LOCAL_DB    = "/tmp/bot_replica.db"
 BASE_DIR    = "user_files"
 STICKER_DIR = "stickers"
 ADMIN_ID    = int(os.environ.get("ADMIN_ID", "1663567950"))
-
+ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "Abdurahim0525")  # @ belgisiz, masalan "ZiplaAdmin"
 # Default limits
 ORIGINAL_MAX_ZIPS_DAY = 3
 ORIGINAL_MAX_STORAGE  = 314572800   # 300 MB
@@ -62,7 +62,6 @@ required_channels:   dict = {}
 awaiting_invite_link: dict = {}   # chat_id -> admin_id (taklif havolasi kutilmoqda)
 
 user_donating:       dict = {}
-user_contact_admin:  dict = {}
 admin_reply_to:      dict = {}
 user_zip_naming:     dict = {}
 _user_file_locks:    dict = {}
@@ -506,7 +505,7 @@ TEXTS = {
             "☕ *Kofe sotib oling!*\n\n"
             "Botni rivojlantirish uchun istalgan miqdorda yordam bering.\n\n"
             "━━━━━━━━━━━━━━━\n"
-            "🇺🇿 *Uzcard:* `@Abduraxim0525`\n"
+            "🇺🇿 *Humo:* `9860096601718388`\n"
             "💳 *Visa:* `4916990318718514`\n\n"
             "🪙 *USDT (TRC20):*\n`TAs1YHxyz8tgYYTsDYPFqdtu9VxMjWPbKw`\n\n"
             "🪙 *USDT (BEP20 / PLASMA):*\n`0x10355140b54a53188c056a29e5973a40181b21ef`\n\n"
@@ -535,9 +534,7 @@ TEXTS = {
             "📈 Bugun hajm: *{today_mb:.1f}* MB"
         ),
         # Contact admin
-        "contact_ask":      "✍️ Adminga xabaringizni yozing yoki rasm/video yuboring:",
-        "contact_sent":     "✅ Xabaringiz adminga yuborildi!",
-        "contact_cancel":   "❌ Bekor qilindi.",
+        "contact_text": "📞 Admin bilan bog‘lanish uchun quyidagi tugmani bosing:",
         "admin_msg_from":   "📩 *Foydalanuvchi xabari*\n\n👤 {name}\n🆔 `{uid}`\n🔗 {username}",
         "admin_reply_ask":  "↩️ Javob yozing yoki rasm/video yuboring:",
         "admin_reply_sent": "✅ Javob yuborildi.",
@@ -571,6 +568,7 @@ TEXTS = {
             "• Max *300 MB* total size\n"
             "• *3 ZIPs* per day"
         ),
+        "contact_text": "📞 Click the button below to contact the admin:",
         "files_saved":  "✅ *{count} file(s)* received!\n\n👇 Press Create ZIP when ready:",
         "receiving":    "📥 *Receiving files...*",
         "max_files":    "⛔ *File limit reached!*\n\nMaximum *{max_files} files* per ZIP.\nPlease ZIP current files first.",
@@ -620,9 +618,6 @@ TEXTS = {
             "🕐 Today ZIPs: *{today_zips}*\n"
             "📈 Today size: *{today_mb:.1f}* MB"
         ),
-        "contact_ask":      "✍️ Write your message or send a photo/video to admin:",
-        "contact_sent":     "✅ Your message has been sent to admin!",
-        "contact_cancel":   "❌ Cancelled.",
         "admin_msg_from":   "📩 *User message*\n\n👤 {name}\n🆔 `{uid}`\n🔗 {username}",
         "admin_reply_ask":  "↩️ Write your reply or send a photo/video:",
         "admin_reply_sent": "✅ Reply sent.",
@@ -759,19 +754,6 @@ async def send_sticker(client, chat_id: int, name: str):
             pass
 
 
-
-async def error_to_admin(client, context: str, uid: int, err: Exception):
-    try:
-        await client.send_message(
-            ADMIN_ID,
-            f"🚨 *XATOLIK*\n\n📍 `{context}`\n👤 `{uid}`\n"
-            f"❗ `{type(err).__name__}: {err}`\n"
-            f"🕐 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-            parse_mode=enums.ParseMode.MARKDOWN,
-        )
-    except Exception as e:
-        print(f"[error_to_admin] {e}")
-
 async def show_donate(client, chat_id: int, uid: int):
     lang    = get_lang(uid) or "uz"
     donors  = get_top_donors()
@@ -793,38 +775,6 @@ async def show_donate(client, chat_id: int, uid: int):
         ]]),
     )
 
-async def _handle_contact_media(client, message: Message):
-    uid  = message.from_user.id
-    lang = get_lang(uid) or "uz"
-    user_contact_admin.pop(uid, None)
-
-    fn       = message.from_user.first_name or "User"
-    username = f"@{message.from_user.username}" if message.from_user.username else "—"
-    caption  = TEXTS["uz"]["admin_msg_from"].format(name=fn, uid=uid, username=username)
-
-    try:
-        if message.photo:
-            await client.send_photo(
-                ADMIN_ID, message.photo.file_id,
-                caption=caption, parse_mode=enums.ParseMode.MARKDOWN,
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton(TEXTS["uz"]["reply_btn"], callback_data=f"reply_{uid}")
-                ]]),
-            )
-        elif message.video:
-            await client.send_video(
-                ADMIN_ID, message.video.file_id,
-                caption=caption, parse_mode=enums.ParseMode.MARKDOWN,
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton(TEXTS["uz"]["reply_btn"], callback_data=f"reply_{uid}")
-                ]]),
-            )
-        else:
-            return
-        await client.send_message(message.chat.id, TEXTS[lang]["contact_sent"],
-                                  parse_mode=enums.ParseMode.MARKDOWN)
-    except Exception as e:
-        print(f"[contact_media] {e}")
 
 async def _handle_admin_reply_media(client, message: Message):
     target_uid = admin_reply_to.pop(ADMIN_ID, None)
@@ -1173,8 +1123,8 @@ async def receive_file(client, message: Message, obj, filename: str):
     save_path = unique_path(udir, safe_name)
     try:
         await message.download(file_name=save_path)
-    except Exception as e:
-        await error_to_admin(client, "receive_file→download", uid, e)
+    except Exception:
+        pass
     finally:
         async with lock:
             user_downloading[uid]    = max(0, user_downloading.get(uid, 1) - 1)
@@ -1371,9 +1321,6 @@ async def on_document(client, message):
 async def on_photo(client, message):
     # Skip if user is trying to contact admin or admin is replying
     uid = message.from_user.id
-    if uid in user_contact_admin:
-        await _handle_contact_media(client, message)
-        return
     if uid == ADMIN_ID and ADMIN_ID in admin_reply_to:
         await _handle_admin_reply_media(client, message)
         return
@@ -1382,9 +1329,6 @@ async def on_photo(client, message):
 @app.on_message(filters.video)
 async def on_video(client, message):
     uid = message.from_user.id
-    if uid in user_contact_admin:
-        await _handle_contact_media(client, message)
-        return
     if uid == ADMIN_ID and ADMIN_ID in admin_reply_to:
         await _handle_admin_reply_media(client, message)
         return
@@ -1478,7 +1422,6 @@ async def create_and_send_zip(client, chat_id: int, uid: int, zip_name_raw: str,
             add_zip_stat(uid, zip_size / 1024 / 1024, fcount)
         except Exception as e:
             await client.send_message(chat_id, tx(uid, "zip_error"), parse_mode=enums.ParseMode.MARKDOWN)
-            await error_to_admin(client, "create_and_send_zip", uid, e)
             return
         finally:
             await safe_delete(progress)
@@ -1551,15 +1494,18 @@ async def on_text(client, message):
         return
 
     # ── Keyboard button: Admin bilan bog'lanish ──
+        # ── Keyboard button: Admin bilan bog'lanish ──
     if text == t["btn_contact"]:
         await safe_delete(message)
-        user_contact_admin[uid] = True
+        contact_text = t.get("contact_text", "📞 Admin bilan bog‘lanish uchun quyidagi tugmani bosing:")
+        admin_link = f"https://t.me/{ADMIN_USERNAME}" if ADMIN_USERNAME else f"tg://user?id={ADMIN_ID}"
         await client.send_message(
-            message.chat.id, t["contact_ask"],
+            message.chat.id,
+            contact_text,
             parse_mode=enums.ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("❌ Bekor qilish", callback_data="contact_cancel")
-            ]]),
+                InlineKeyboardButton("✉️ Admin bilan yozishish", url=admin_link)
+            ]])
         )
         return
 
@@ -1577,27 +1523,6 @@ async def on_text(client, message):
             await create_and_send_zip(client, info["chat_id"], uid, zip_name)
         return
 
-    # ── User contacting admin ──
-    if uid in user_contact_admin:
-        user_contact_admin.pop(uid, None)
-        fn       = message.from_user.first_name or "User"
-        username = f"@{message.from_user.username}" if message.from_user.username else "—"
-        caption  = TEXTS["uz"]["admin_msg_from"].format(name=fn, uid=uid, username=username)
-        try:
-            await client.send_message(
-                ADMIN_ID,
-                f"{caption}\n\n💬 {text}",
-                parse_mode=enums.ParseMode.MARKDOWN,
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton(TEXTS["uz"]["reply_btn"], callback_data=f"reply_{uid}")
-                ]]),
-            )
-            await client.send_message(message.chat.id, t["contact_sent"],
-                                      parse_mode=enums.ParseMode.MARKDOWN)
-        except Exception as e:
-            print(f"[contact_text] {e}")
-        await safe_delete(message)
-        return
 
     # ── Admin replying to user ──
     if uid == ADMIN_ID and ADMIN_ID in admin_reply_to:
@@ -2460,14 +2385,6 @@ async def cb_zip_name_skip(client, call):
         sm = user_status_msg.pop(uid, None)
         await safe_delete(sm)
         await create_and_send_zip(client, info["chat_id"], uid, info["default_name"])
-
-@app.on_callback_query(filters.create(lambda _, __, q: q.data == "contact_cancel"))
-async def cb_contact_cancel(client, call):
-    uid  = call.from_user.id
-    lang = get_lang(uid) or "uz"
-    user_contact_admin.pop(uid, None)
-    await call.answer(TEXTS[lang]["contact_cancel"], show_alert=True)
-    await safe_delete(call.message)
 
 # ════════════════════════════════════════════════════════════
 #  FLASK — keep-alive
