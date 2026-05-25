@@ -477,8 +477,8 @@ TEXTS = {
             "⏱ *40 soniya* ichida tugma bosilmasa — avtozip.\n\n"
             "📋 *Cheklovlar:*\n"
             "• Max *{max_files} ta fayl* (bir ZIP uchun)\n"
-            "• Max *300 MB* umumiy hajm\n"
-            "• Kuniga *3 ta ZIP*"
+            "• Max *{max_storage} MB* umumiy hajm\n"
+            "• Kuniga *{max_zips} ta ZIP*"
         ),
         "files_saved":  "✅ *{count} ta fayl* qabul qilindi!\n\n👇 ZIP yasash tugmasini bosing:",
         "receiving":    "📥 *Fayllar qabul qilinmoqda...*",
@@ -565,8 +565,8 @@ TEXTS = {
             "⏱ *Auto-zipped* after 40 seconds.\n\n"
             "📋 *Limits:*\n"
             "• Max *{max_files} files* per ZIP\n"
-            "• Max *300 MB* total size\n"
-            "• *3 ZIPs* per day"
+            "• Max *{max_storage} MB* total size\n"
+            "• *{max_zips} ZIPs* per day"
         ),
         "contact_text": "📞 Click the button below to contact the admin:",
         "files_saved":  "✅ *{count} file(s)* received!\n\n👇 Press Create ZIP when ready:",
@@ -637,8 +637,22 @@ TEXTS = {
 def tx(uid: int, key: str, **kw) -> str:
     lang = get_lang(uid) or "uz"
     text = TEXTS.get(lang, TEXTS["uz"]).get(key, key)
+    
+    # Avtomatik o'zgaruvchilarni matnga yetkazish
     if 'max_files' not in kw:
         kw['max_files'] = get_user_max_files(uid) if uid else MAX_FILES
+        
+    if 'max_zips' not in kw or 'max_storage' not in kw:
+        # get_user_limits(uid) funksiyangiz (max_zips, max_storage) qaytaradi deb hisoblaymiz
+        max_zips, max_storage = get_user_limits(uid) if uid else (DEFAULT_ZIPS_DAY, DEFAULT_STORAGE)
+        
+        if 'max_zips' not in kw:
+            kw['max_zips'] = max_zips
+            
+        if 'max_storage' not in kw:
+            # Baytni MB ga o'giramiz: 314572800 / 1024 / 1024 = 300
+            kw['max_storage'] = int(max_storage / 1024 / 1024)
+            
     return text.format(**kw)
 
 def main_keyboard(uid: int):
@@ -940,9 +954,9 @@ def schedule_batch_timer(uid: int, chat_id: int, client):
     user_batch_timer[uid] = task
 
 async def check_batch_complete(client, uid: int, chat_id: int, user_obj):
-    """Har bir fayl yuklangach chaqiriladi. Agar yuklanayotgan fayl qolmagan bo‘lsa, yakuniy xabarni chiqaradi."""
+    """Har bir fayl jarayoni tugagach chaqiriladi."""
     if user_downloading.get(uid, 0) > 0:
-        return  # hali yuklanayotgan fayllar bor
+        return  # hali yuklanayotgan real fayllar bor
 
     # Batch tugadi – taymerni bekor qilamiz
     t = user_batch_timer.pop(uid, None)
@@ -955,8 +969,39 @@ async def check_batch_complete(client, uid: int, chat_id: int, user_obj):
 
     user_batch_active[uid] = False
 
-    # Yakuniy status xabarini yuboramiz
-    await _send_final_status(client, chat_id, uid)
+    # 🔥 YAKUNIY STATUSNI SHU YERDA ANIQ VA BITTA XABAR BILAN CHIQARAMIZ:
+    accepted = file_count(uid)
+    rejected = user_excess.pop(uid, 0) # excess_msg o'rniga shu yerda olamiz
+
+    if accepted > 0 or rejected > 0:
+        sm = user_status_msg.pop(uid, None)
+        await safe_delete(sm)  # eski status xabarini tozalaymiz
+
+        lang = get_lang(uid) or "uz"
+        user_max = get_user_max_files(uid)
+        markup = InlineKeyboardMarkup([[InlineKeyboardButton(tx(uid, "ready_btn"), callback_data="zip_now")]])
+
+        if rejected > 0:
+            # Agar limitdan oshgan fayllar bo'lsa
+            if lang == "uz":
+                text = (f"✅ *{accepted} ta fayl* qabul qilindi!\n"
+                        f"❌ *{rejected} ta fayl* qabul qilinmadi ({user_max} ta limit).\n\n"
+                        f"👇 ZIP yasash tugmasini bosing:")
+            else:
+                text = (f"✅ *{accepted} file(s)* received!\n"
+                        f"❌ *{rejected} file(s)* rejected ({user_max} file limit).\n\n"
+                        f"👇 Press Create ZIP when ready:")
+        else:
+            # Agar hamma fayllar muvaffaqiyatli o'tgan bo'lsa
+            if lang == "uz":
+                text = (f"✅ *{accepted} ta fayl* qabul qilindi!\n\n"
+                        f"👇 ZIP yasash tugmasini bosing:")
+            else:
+                text = (f"✅ *{accepted} file(s)* received!\n\n"
+                        f"👇 Press Create ZIP:")
+
+        sent = await client.send_message(chat_id, text, parse_mode=enums.ParseMode.MARKDOWN, reply_markup=markup)
+        user_status_msg[uid] = sent
 
     # Avto-zip taymerini ishga tushiramiz
     await cancel_task(user_auto_zip, uid)
@@ -1023,8 +1068,12 @@ def start_auto_zip(client, chat_id: int, uid: int, delay: int = AUTO_ZIP_DELAY, 
 
 
 
+# Modul darajasida (fayl tepasida, configlar tagida) joriy hisobni saqlovchi yangi o'zgaruvchi ochamiz:
+if 'user_base_count' not in globals():
+    globals()['user_base_count'] = {}
+
 # ════════════════════════════════════════════════════════════
-#  FAYL QABUL QILISH  (race-condition fixed)
+#  FAYL QABUL QILISH (Pure In-Memory Counter & Temp File Filtered)
 # ════════════════════════════════════════════════════════════
 async def receive_file(client, message: Message, obj, filename: str):
     uid = message.from_user.id
@@ -1035,17 +1084,19 @@ async def receive_file(client, message: Message, obj, filename: str):
     message._handled = True
 
     if is_banned(uid):
+        # Banlangan foydalanuvchini tozalash ma'qul, buni qoldirishingiz mumkin
         await safe_delete(message)
         return
 
     lang = get_lang(uid) or "uz"
     if not await gate_check(client, uid, message.chat.id, lang):
+        # Kanallarga a'zo bo'lmaganda yuborilgan faylni o'chiramiz (tartib uchun)
         await safe_delete(message)
         return
 
     max_zips, max_storage = get_user_limits(uid)
     if get_daily_zip_count(uid) >= max_zips:
-        await safe_delete(message)
+        # 🔥 O'ZGARTIRILDI: safe_delete olib tashlandi. Fayl chatda qoladi!
         schedule_limit_msg(client, message.chat.id, uid)
         return
 
@@ -1053,21 +1104,40 @@ async def receive_file(client, message: Message, obj, filename: str):
     accepted = False
     was_downloading = False
 
+    udir      = user_dir(uid)
+    safe_name = sanitize_filename(filename)
+
     lock = get_user_file_lock(uid)
     async with lock:
-        used_now = disk_used(uid) + user_reserved_bytes.get(uid, 0)
-        cur_cnt  = file_count(uid) + user_downloading.get(uid, 0)
+        save_path = unique_path(udir, safe_name)
 
+        # 1. Paket boshlanganda diskni bir marta sanab olish
+        if user_downloading.get(uid, 0) == 0:
+            if os.path.exists(udir):
+                disk_files = [f for f in os.listdir(udir) if os.path.isfile(os.path.join(udir, f)) and not f.endswith(('.temp', '.part', '.download'))]
+                user_base_count[uid] = len(disk_files)
+            else:
+                user_base_count[uid] = 0
+
+        used_now = disk_used(uid) + user_reserved_bytes.get(uid, 0)
+        cur_cnt = user_base_count.get(uid, 0) + user_downloading.get(uid, 0)
+
+        # 2. Limitlarni tekshirish qismi (receive_file ichida)
         if cur_cnt >= get_user_max_files(uid):
             user_excess[uid] = user_excess.get(uid, 0) + 1
-            schedule_task(user_debounce, uid, _send_excess_msg(client, message.chat.id, uid))
+            
+            # 🔥 O'ZGARTIRILDI: Alvido _send_excess_msg! 
+            # Faqatgina paket taymeri o'chib qolmasligi uchun uni yangilab qo'yamiz
+            if not user_downloading.get(uid, 0) > 0 and not user_batch_active.get(uid, False):
+                schedule_batch_timer(uid, message.chat.id, client)
         elif used_now + fsize > max_storage:
             user_storage_rej[uid] = user_storage_rej.get(uid, 0) + 1
+            
             async def _send_storage_full_msg(chat_id, u, _used_now=used_now, _max_storage=max_storage):
                 await asyncio.sleep(DEBOUNCE_SEC)
                 rej_cnt = user_storage_rej.pop(u, 0)
-                udir    = user_dir(u)
-                acc_cnt = len([f for f in os.listdir(udir) if os.path.isfile(os.path.join(udir, f))])
+                u_dir   = user_dir(u)
+                acc_cnt = len([f for f in os.listdir(u_dir) if os.path.isfile(os.path.join(u_dir, f)) and not f.endswith(('.temp', '.part', '.download'))])
                 lang_u  = get_lang(u) or "uz"
                 if lang_u == "uz":
                     text = (f"⚠️ *Xotira to'lib qoldi!*\n\n"
@@ -1090,18 +1160,20 @@ async def receive_file(client, message: Message, obj, filename: str):
                 user_status_msg[u] = sfm
                 await cancel_task(user_auto_zip, u)
                 start_auto_zip(client, chat_id, u, delay=40, user_obj=None)
+
             schedule_task(user_debounce, uid, _send_storage_full_msg(message.chat.id, uid))
+            # 🔥 Fayl qabul qilinmadi (accepted = False), return bo'ladi va chatda qoladi!
         else:
             was_downloading = user_downloading.get(uid, 0) > 0
             user_reserved_bytes[uid] = user_reserved_bytes.get(uid, 0) + fsize
             user_downloading[uid]    = user_downloading.get(uid, 0) + 1
             accepted = True
 
+    # Agar qabul qilinmagan bo'lsa, shunchaki funksiyani yakunlaymiz (fayl chatda o'chmaydi!)
     if not accepted:
-        await safe_delete(message)
         return
 
-    # Yangi fayl kelganda oldingi jarayonlarni tozalaymiz
+    # Oldingi taymer va xabarlarni tozalash (Faqat qabul qilingan fayllar uchun)
     await cancel_task(user_auto_zip, uid)
     sm_old = user_status_msg.pop(uid, None)
     await safe_delete(sm_old)
@@ -1109,29 +1181,32 @@ async def receive_file(client, message: Message, obj, filename: str):
     await safe_delete(recv_old)
     user_batch_active.pop(uid, None)
 
-    # Birinchi fayl bo‘lsa 1.5 soniyalik taymer, aks holda agar taymer hali ishlamagan bo‘lsa yangilaymiz
     if not was_downloading:
         schedule_batch_timer(uid, message.chat.id, client)
     else:
-        # Agar hali "qabul qilinmoqda" xabari chiqmagan bo‘lsa taymerni qayta ishga tushiramiz
         if not user_batch_active.get(uid, False):
             schedule_batch_timer(uid, message.chat.id, client)
 
-    # Faylni yuklash
-    udir      = user_dir(uid)
-    safe_name = sanitize_filename(filename)
-    save_path = unique_path(udir, safe_name)
+    # Faylni diskka yuklash jarayoni
+    download_success = False
     try:
         await message.download(file_name=save_path)
+        download_success = True
     except Exception:
         pass
     finally:
         async with lock:
             user_downloading[uid]    = max(0, user_downloading.get(uid, 1) - 1)
             user_reserved_bytes[uid] = max(0, user_reserved_bytes.get(uid, fsize) - fsize)
+            
+            if download_success:
+                user_base_count[uid] = user_base_count.get(uid, 0) + 1
+
         await check_batch_complete(client, uid, message.chat.id, message.from_user)
 
-    await safe_delete(message)
+    # 🔥 FAQATGINA muvaffaqiyatli qabul qilingan va yuklangan faylni chatdan tozalaymiz!
+    if accepted and download_success:
+        await safe_delete(message)
 # ════════════════════════════════════════════════════════════
 #  BOT
 # ════════════════════════════════════════════════════════════
@@ -1177,25 +1252,78 @@ async def cmd_admin(client, message):
         ]),
     )
 # ════════════════════════════════════════════════════════════
-#  /start
+#  /start buyrug'i
 # ════════════════════════════════════════════════════════════
 @app.on_message(filters.command("start"))
 async def cmd_start(client, message):
     uid = message.from_user.id
     await safe_delete(message)
+    
     if is_banned(uid):
         return
-    if get_lang(uid) is None:
-        upsert_user(message.from_user, "uz")
-    sent = await client.send_message(
+
+    lang = get_lang(uid)
+
+    if lang is not None:
+        # 1. AGAR TIL OLDIN TANLANGAN BO'LSA: To'g'ridan-to'g'ri Welcome xabarini chiqaramiz
+        name = message.from_user.first_name or "Foydalanuvchi"
+        
+        # Eski welcome xabarini tozalaymiz
+        old_wm = user_welcome_msg.pop(uid, None)
+        await safe_delete(old_wm)
+
+        sent = await client.send_message(
+            message.chat.id,
+            tx(uid, "welcome", name=name),
+            parse_mode=enums.ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton(TEXTS[lang]["change_lang"], callback_data="change_lang")
+            ]]),
+        )
+        user_welcome_msg[uid] = sent
+        await send_sticker(client, message.chat.id, "start")
+        
+        # Pastdagi asosiy menyu klaviaturasini chiqarish
+        await client.send_message(
+            message.chat.id, "👇",
+            reply_markup=main_keyboard(uid),
+        )
+        
+        # Kanallarni tekshirish (majburiy obuna)
+        if required_channels:
+            await gate_check(client, uid, message.chat.id, lang)
+            
+    else:
+        # 2. AGAR TIL TANLANMAGAN BO'LSA (Birinchi marta kirganda): Til tanlash tugmalari chiqadi
+        sent = await client.send_message(
+            message.chat.id,
+            "🌐 Tilni tanlang / Choose language:",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🇺🇿 O'zbek", callback_data="setlang_uz"),
+                InlineKeyboardButton("🇬🇧 English", callback_data="setlang_en"),
+            ]]),
+        )
+        user_welcome_msg[uid] = sent
+
+# ════════════════════════════════════════════════════════════
+#  /language buyrug'i (Tilni xohlagan paytda o'zgartirish)
+# ════════════════════════════════════════════════════════════
+@app.on_message(filters.command(["language", "lang"]) & filters.private)
+async def cmd_change_lang(client, message: Message):
+    uid = message.from_user.id
+    await safe_delete(message)
+    
+    if is_banned(uid):
+        return
+
+    await client.send_message(
         message.chat.id,
-        TEXTS["uz"]["choose_lang"],
+        "🌐 Yangi tilni tanlang / Choose a new language:",
         reply_markup=InlineKeyboardMarkup([[
             InlineKeyboardButton("🇺🇿 O'zbek", callback_data="setlang_uz"),
             InlineKeyboardButton("🇬🇧 English", callback_data="setlang_en"),
         ]]),
     )
-    user_welcome_msg[uid] = sent
 
 @app.on_message(filters.forwarded & filters.user(ADMIN_ID))
 async def on_forwarded(client, message):
