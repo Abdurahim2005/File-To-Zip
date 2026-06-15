@@ -492,7 +492,7 @@ TEXTS = {
         "ready_btn":    "📦 ZIP yasash",
         "zip_wait":     "⏳ *Fayllar hali yuklanmoqda...* biroz kuting.",
         "zip_queue":    "⏳ *Navbatda...* ZIP jarayoni band, kuting.",
-        "zip_caption":  "📦 *ZIP tayyor!*\n\n🤖 @Zipla_bot — Hayotni Ziplab o't!",
+        "zip_caption":  "📦 *ZIP tayyor!*\n🤖 @Zipla_bot — Hayotni Ziplab o't!",
         "no_files":     "⚠️ Avval fayl yuboring.",
         "zip_error":    "❌ ZIP yaratishda xato. Qaytadan urining.",
         "lang_set":     "✅ Til saqlandi!",
@@ -602,7 +602,7 @@ TEXTS = {
         "ready_btn":    "📦 Create ZIP",
         "zip_wait":     "⏳ *Files still uploading...* please wait.",
         "zip_queue":    "⏳ *In queue...* ZIP process is busy, please wait.",
-        "zip_caption":  "📦 *ZIP is ready!*\n\n🤖 @Zipla_bot — Zip your life!",
+        "zip_caption":  "📦 *ZIP is ready!*\n🤖 @Zipla_bot — Zip your life!",
         "no_files":     "⚠️ Please send files first.",
         "zip_error":    "❌ ZIP creation failed. Please try again.",
         "lang_set":     "✅ Language saved!",
@@ -1581,9 +1581,9 @@ async def create_and_send_zip(client, chat_id: int, uid: int, zip_name_raw: str,
             user_max_files = get_user_max_files(uid)
             lang = get_lang(uid) or "uz"
             if user_max_files >= 40:
-                level_text = "⭐ Premium" if lang == "uz" else "⭐ Premium"
+                level_text = "👑Level:⭐ Premium" if lang == "uz" else "👑Level:⭐ Premium"
             else:
-                level_text = "🔹 Oddiy" if lang == "uz" else "🔹 Regular"
+                level_text = "🪖Level:🔹 Oddiy" if lang == "uz" else "🪖Level:🔹 Regular"
 
             caption  = tx(uid, "zip_caption") + f"\n\n{level_text}"
             if auto:
