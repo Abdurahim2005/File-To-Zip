@@ -512,8 +512,6 @@ TEXTS = {
             "━━━━━━━━━━━━━━━\n"
             "To'lov qilgach miqdor va valyutani yozing,\n«✅ Donat qildim» tugmasini bosing."
         ),
-        "donate_btn":       "☕ Donat qilish",
-        "donate_done_btn":  "✅ Donat qildim",
         "donate_ask":       "💬 Donat miqdori va valyutasini yozing:\nMisol: `50000 UZS` yoki `5 USDT`",
         "donate_sent":      "✅ So'rovingiz qabul qilindi! Admin tez orada tasdiqlaydi. 🙏",
         "top_donors":       "🏆 *Top Donatorlar*\n\n{list}",
@@ -620,8 +618,6 @@ TEXTS = {
             "━━━━━━━━━━━━━━━\n"
             "After payment, type the amount and currency,\nthen press «✅ I donated»."
         ),
-        "donate_btn":       "☕ Donate",
-        "donate_done_btn":  "✅ I donated",
         "donate_ask":       "💬 Type the amount and currency:\nExample: `5 USDT` or `50000 UZS`",
         "donate_sent":      "✅ Request received! Admin will confirm soon. 🙏",
         "top_donors":       "🏆 *Top Donors*\n\n{list}",
