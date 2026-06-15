@@ -550,6 +550,27 @@ TEXTS = {
             "• Kunlik ZIP limiti yo'q\n• Max 1 GB fayl hajmi\n"
             "• Max 100 ta fayl per ZIP\n• Ustuvor navbat\n\nQiziqasizmi? Adminga yozing!"
         ),
+        "premium_info": (
+    "🦯🤩 *Premium – Cheklovlarni unuting!*\n\n"
+    "Oddiy foydalanuvchi bo‘lishdan charchadingizmi? "
+    "Premium bilan bot imkoniyatlari cheksizlikka yaqinlashadi! 🚀\n\n"
+    "━━━━━━━━━━━━━━━━━━━\n"
+    "💎 *15 kunlik Premium narxlari:*\n\n"
+    "🗂 *Xotira:* 300 MB → *1 GB*\n"
+    "📦 *Kunlik ZIP:* 3 ta → *10 ta*\n"
+    "📎 *Fayllar soni:* 20 ta → *40 ta*\n"
+    "🗜 *Siqish:* Matnli fayllar uchun *O‘rta daraja*\n"
+    "   _(❌ Rasm, video, pptx siqilmaydi)_\n\n"
+    "━━━━━━━━━━━━━━━━━━━\n"
+    "💸 *Narx:* 13 000 UZS\n"
+    "🪙 *Crypto:* 1 USDT\n\n"
+    "💳 *To‘lov:* Humo, Uzcard, Visa, Crypto\n\n"
+    "━━━━━━━━━━━━━━━━━━━\n"
+    "👮‍♂ Admin: @Abdurahim0525\n"
+    "📡 Kanal: @Zipla_Bot_News\n"
+    "🤖 Bot: @Zipla_bot\n\n"
+    "👇 Pastdagi tugmani bosing va Premium oling!"
+),
     },
     "en": {
         "choose_lang": "🌍 Choose language:",
@@ -625,11 +646,26 @@ TEXTS = {
         "reply_btn":        "↩️ Reply",
         "zip_name_ask":     "📝 *Enter ZIP name:*\n_(Leave empty for auto name, 30 seconds)_",
         "zip_name_skip":    "⏭ Skip",
-        "premium_text": (
-            "⭐ *Premium Info*\n\nPremium features are coming soon.\n\n"
-            "📋 *Planned features:*\n"
-            "• Unlimited daily ZIPs\n• Up to 1 GB file size\n"
-            "• Up to 100 files per ZIP\n• Priority queue\n\nInterested? Contact admin!"
+        "premium_info": (
+            "🦯🤩 *Premium – Break All Limits!*\n\n"
+            "Tired of being an ordinary user? "
+            "With Premium, your bot capabilities become almost limitless! 🚀\n\n"
+            "━━━━━━━━━━━━━━━━━━━\n"
+            "💎 *15 Days Premium Pricing:*\n\n"
+            "🗂 *Storage:* 300 MB → *1 GB*\n"
+            "📦 *Daily ZIPs:* 3 → *10*\n"
+            "📎 *Files per ZIP:* 20 → *40*\n"
+            "🗜 *Compression:* Medium for text files\n"
+            "   _(❌ Images, video, pptx excluded)_\n\n"
+            "━━━━━━━━━━━━━━━━━━━\n"
+            "💸 *Price:* 13 000 UZS\n"
+            "🪙 *Crypto:* 1 USDT\n\n"
+            "💳 *Payment:* Humo, Uzcard, Visa, Crypto\n\n"
+            "━━━━━━━━━━━━━━━━━━━\n"
+            "👮‍♂ Admin: @Abdurahim0525\n"
+            "📡 Channel: @Zipla_Bot_News\n"
+            "🤖 Bot: @Zipla_bot\n\n"
+            "👇 Press the button below and get Premium!"
         ),
     },
 }
@@ -659,7 +695,7 @@ def main_keyboard(uid: int):
     lang = get_lang(uid) or "uz"
     t = TEXTS.get(lang, TEXTS["uz"])
     return ReplyKeyboardMarkup(
-        [[KeyboardButton(t["btn_donate"]), KeyboardButton(t["btn_stats"])],
+        [[KeyboardButton("⭐ Premium"), KeyboardButton(t["btn_stats"])],
          [KeyboardButton(t["btn_contact"])]],
         resize_keyboard=True
     )
@@ -1599,10 +1635,19 @@ async def on_text(client, message):
     lang = get_lang(uid) or "uz"
     t    = TEXTS.get(lang, TEXTS["uz"])
 
-    # ── Keyboard button: Donat ──
-    if text == t["btn_donate"]:
+        # ── Keyboard button: Premium ──
+    if text == "⭐ Premium":
         await safe_delete(message)
-        await show_donate(client, message.chat.id, uid)
+        lang = get_lang(uid) or "uz"
+        await client.send_message(
+            message.chat.id,
+            TEXTS[lang]["premium_info"],
+            parse_mode=enums.ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("💎 Premium olish | Get Premium", url="https://t.me/Abdurahim0525")
+            ]]),
+            disable_web_page_preview=True,
+        )
         return
 
     # ── Keyboard button: Statistika ──
@@ -1692,50 +1737,6 @@ async def on_text(client, message):
         action = waiting_for_user_id.pop(uid)
         raw    = text
 
-        if action == "confirm_donation":
-            try:
-                don_id = int(re.search(r"\d+", raw).group())
-                confirm_donation(don_id)
-                pend = get_db().execute(
-                    "SELECT telegram_id, first_name, amount, currency FROM donations WHERE id=?", (don_id,)
-                ).fetchone()
-                if pend:
-                    try:
-                        await client.send_message(
-                            pend[0],
-                            f"🎉 Donatlingiz tasdiqlandi! Rahmat, *{pend[1]}*!\n"
-                            f"💰 *{pend[2]} {pend[3]}*\n\n☕ @Zipla_bot",
-                            parse_mode=enums.ParseMode.MARKDOWN,
-                        )
-                    except Exception:
-                        pass
-                await message.reply(f"✅ Donat #{don_id} tasdiqlandi.")
-            except Exception:
-                await message.reply("❌ ID xato.")
-            return
-
-        if action == "reject_donation":
-            try:
-                don_id = int(re.search(r"\d+", raw).group())
-                pend = get_db().execute(
-                    "SELECT telegram_id, first_name FROM donations WHERE id=? AND confirmed=0", (don_id,)
-                ).fetchone()
-                reject_donation(don_id)
-                if pend:
-                    try:
-                        await client.send_message(
-                            pend[0],
-                            f"❌ *Donat so'rovingiz bekor qilindi.*\n\nDon ID: #{don_id}\n\n"
-                            f"Savollar uchun adminga murojaat qiling.",
-                            parse_mode=enums.ParseMode.MARKDOWN,
-                        )
-                    except Exception:
-                        pass
-                await message.reply(f"✅ Donat #{don_id} bekor qilindi.")
-            except Exception:
-                await message.reply("❌ ID xato.")
-            return
-
         if action == "set_zip_limit":
             parts = raw.split()
             if len(parts) < 2:
@@ -1777,7 +1778,7 @@ async def on_text(client, message):
 
         if action == "reset_limits":
             try:
-                target_id = int(re.search(r"\d+", raw).group())
+                target_id = int(re.search(r"\d+", raw).group()) # type: ignore
                 reset_user_limits(target_id)
                 await message.reply(f"✅ `{target_id}` limiti standartga qaytarildi.",
                                     parse_mode=enums.ParseMode.MARKDOWN)
@@ -1847,6 +1848,37 @@ async def on_text(client, message):
                 await message.reply(f"✅ Hamma uchun fayl limiti: *{limit_val}* ta")
             except Exception:
                 await message.reply("❌ Butun son yuboring")
+            return
+        if action == "premium_on":
+            try:
+                target_id = int(raw)
+                # Premium qiymatlar:
+                set_user_zip_limit(target_id, 10)           # kunlik 10 ta ZIP
+                set_user_storage_limit(target_id, 1024 * 1024 * 1024)  # 1 GB
+                set_user_max_files(target_id, 40)           # 40 ta fayl
+                set_user_compression(target_id, 6)          # o‘rta siqish
+                await message.reply(
+                    f"✅ Premium yoqildi!\n"
+                    f"👤 ID: `{target_id}`\n"
+                    f"📦 ZIP: 10 ta/kun | 💾 1 GB | 📎 40 fayl | 🗜 O‘rta siqish",
+                    parse_mode=enums.ParseMode.MARKDOWN,
+                )
+            except Exception:
+                await message.reply("❌ Noto‘g‘ri ID.")
+            return
+
+        if action == "premium_off":
+            try:
+                target_id = int(raw)
+                reset_user_limits(target_id)
+                await message.reply(
+                    f"✅ Premium bekor qilindi!\n"
+                    f"👤 ID: `{target_id}`\n"
+                    f"Barcha limitlar standartga qaytarildi.",
+                    parse_mode=enums.ParseMode.MARKDOWN,
+                )
+            except Exception:
+                await message.reply("❌ Noto‘g‘ri ID.")
             return
         
         if action == "add_channel":
@@ -2277,7 +2309,27 @@ async def adm_limits(client, call):
             [InlineKeyboardButton("🔄 Hamma uchun standartga qaytarish", callback_data="adm_all_reset")],
             [InlineKeyboardButton("📎 Foydalanuvchi fayl limiti", callback_data="adm_set_file_limit"),
             InlineKeyboardButton("📎 Hamma uchun fayl limiti", callback_data="adm_all_file_limit")],
+            [InlineKeyboardButton("⭐ Premium yoqish", callback_data="adm_premium_on"),
+            InlineKeyboardButton("❌ Premium bekor qilish", callback_data="adm_premium_off")],
         ]),
+    )
+    await call.answer()
+
+@app.on_callback_query(admin_filter & filters.create(lambda _, __, q: q.data == "adm_premium_on"))
+async def adm_premium_on(client, call):
+    waiting_for_user_id[ADMIN_ID] = "premium_on"
+    await call.message.reply(
+        "⭐ Premium yoqish uchun foydalanuvchi ID sini yuboring:",
+        parse_mode=enums.ParseMode.MARKDOWN,
+    )
+    await call.answer()
+
+@app.on_callback_query(admin_filter & filters.create(lambda _, __, q: q.data == "adm_premium_off"))
+async def adm_premium_off(client, call):
+    waiting_for_user_id[ADMIN_ID] = "premium_off"
+    await call.message.reply(
+        "❌ Premium bekor qilish uchun foydalanuvchi ID sini yuboring:",
+        parse_mode=enums.ParseMode.MARKDOWN,
     )
     await call.answer()
 
