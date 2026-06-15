@@ -1574,8 +1574,18 @@ async def create_and_send_zip(client, chat_id: int, uid: int, zip_name_raw: str,
                     fpath = os.path.join(udir, fname)
                     if os.path.isfile(fpath) and fname != zip_name:
                         zf.write(fpath, arcname=fname)
+                        
             zip_size = os.path.getsize(zip_path) if os.path.exists(zip_path) else 0
-            caption  = tx(uid, "zip_caption")
+
+            # Foydalanuvchi darajasini va tilini aniqlash
+            user_max_files = get_user_max_files(uid)
+            lang = get_lang(uid) or "uz"
+            if user_max_files >= 40:
+                level_text = "⭐ Premium" if lang == "uz" else "⭐ Premium"
+            else:
+                level_text = "🔹 Oddiy" if lang == "uz" else "🔹 Regular"
+
+            caption  = tx(uid, "zip_caption") + f"\n\n{level_text}"
             if auto:
                 caption = tx(uid, "auto_zip_done") + "\n\n" + caption
             await client.send_document(
@@ -1852,17 +1862,44 @@ async def on_text(client, message):
         if action == "premium_on":
             try:
                 target_id = int(raw)
+                target_lang = get_lang(target_id) or "uz"
+                
                 # Premium qiymatlar:
                 set_user_zip_limit(target_id, 10)           # kunlik 10 ta ZIP
                 set_user_storage_limit(target_id, 1024 * 1024 * 1024)  # 1 GB
                 set_user_max_files(target_id, 40)           # 40 ta fayl
                 set_user_compression(target_id, 6)          # o‘rta siqish
+                
                 await message.reply(
                     f"✅ Premium yoqildi!\n"
                     f"👤 ID: `{target_id}`\n"
                     f"📦 ZIP: 10 ta/kun | 💾 1 GB | 📎 40 fayl | 🗜 O‘rta siqish",
                     parse_mode=enums.ParseMode.MARKDOWN,
                 )
+                
+                # Foydalanuvchiga xabar yuborish (tiliga qarab)
+                try:
+                    if target_lang == "en":
+                        msg_text = (
+                            "🎉 *Congratulations! You are now a Premium user!*\n\n"
+                            "✅ Daily ZIPs: *10*\n"
+                            "✅ Storage: *1 GB*\n"
+                            "✅ Files per ZIP: *40*\n"
+                            "✅ Compression: *Medium*\n\n"
+                            "🚀 Enjoy unlimited possibilities!"
+                        )
+                    else:
+                        msg_text = (
+                            "🎉 *Tabriklaymiz! Siz Premium foydalanuvchi bo‘ldingiz!*\n\n"
+                            "✅ Kunlik ZIP: *10 ta*\n"
+                            "✅ Xotira: *1 GB*\n"
+                            "✅ Fayllar soni: *40 ta*\n"
+                            "✅ Siqish: *O‘rta daraja*\n\n"
+                            "🚀 Endi cheklovlarsiz ishlashingiz mumkin!"
+                        )
+                    await client.send_message(target_id, msg_text, parse_mode=enums.ParseMode.MARKDOWN)
+                except Exception:
+                    pass
             except Exception:
                 await message.reply("❌ Noto‘g‘ri ID.")
             return
@@ -1870,13 +1907,34 @@ async def on_text(client, message):
         if action == "premium_off":
             try:
                 target_id = int(raw)
+                target_lang = get_lang(target_id) or "uz"
+                
                 reset_user_limits(target_id)
+                
                 await message.reply(
                     f"✅ Premium bekor qilindi!\n"
                     f"👤 ID: `{target_id}`\n"
                     f"Barcha limitlar standartga qaytarildi.",
                     parse_mode=enums.ParseMode.MARKDOWN,
                 )
+                
+                # Foydalanuvchiga xabar yuborish (tiliga qarab)
+                try:
+                    if target_lang == "en":
+                        msg_text = (
+                            "❌ *Your Premium has been cancelled.*\n\n"
+                            "All limits have been reset to default.\n"
+                            "💎 Press /start to get Premium again."
+                        )
+                    else:
+                        msg_text = (
+                            "❌ *Premium muddatingiz tugadi yoki bekor qilindi.*\n\n"
+                            "Barcha limitlaringiz standart holatga qaytarildi.\n"
+                            "💎 Qayta premium olish uchun /start bosing."
+                        )
+                    await client.send_message(target_id, msg_text, parse_mode=enums.ParseMode.MARKDOWN)
+                except Exception:
+                    pass
             except Exception:
                 await message.reply("❌ Noto‘g‘ri ID.")
             return
