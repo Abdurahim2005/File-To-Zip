@@ -857,11 +857,13 @@ async def check_subscription(client, uid: int) -> list:
         if info.get("is_private", 0) == 1:
             # Maxfiy kanal: 1) get_chat_member, 2) join_request bazasi
             try:
-                member = await client.get_chat_member(chat_id, uid)
+                # chat_id raqam bo'lsa uni int turiga o'tkazib tekshirishni kafolatlaymiz
+                member = await client.get_chat_member(int(chat_id), uid)
                 if member.status in (enums.ChatMemberStatus.MEMBER, enums.ChatMemberStatus.ADMINISTRATOR):
                     continue  # a'zo
-            except Exception:
-                pass
+            except Exception as e:
+                # Xatolikni logga chiqaramiz, muammo nimadaligini bilish uchun:
+                print(f"🔴 MAXFIY KANALDA XATOLIK ({chat_id}): {e}")
 
             # get_chat_member a'zo deb topmadi, bazaga qaraymiz
             r = get_db().execute(
@@ -2219,14 +2221,22 @@ async def adm_channels(client, call):
             link = info.get("invite_link", "—")
             line = f"• {info['title']} {icon} — `{link}` (`{cid}`)"
             
-            # Maxfiy kanal uchun so'rovlar sonini qo'shamiz
+           # Maxfiy kanal uchun so'rovlar sonini qo'shamiz
             if info.get("is_private", 0) == 1:
                 try:
-                    count = 0
-                    async for _ in client.get_chat_join_requests(cid, limit=0):
-                        count += 1
+                    # Telegram API'ga so'rov yuborib botni qiynamaymiz, 
+                    # chunki Telegram botlarga buni taqiqlagan [BOT_METHOD_INVALID].
+                    # O'rniga, o'zimizning bazadan shu kanalga tegishli so'rovlarni sanaymiz:
+                    c = get_db()
+                    r = c.execute(
+                        "SELECT COUNT(*) FROM join_requests WHERE chat_id=?", 
+                        (cid,)
+                    ).fetchone()
+                    count = r[0] if r else 0
+                    
                     line += f" | {count} ta so'rov"
                 except Exception as e:
+                    print(f"🔴 BAZADAN SANASHDA XATOLIK ({cid}): {e}")
                     line += " | so'rovlarni olishda xatolik"
             lines.append(line)
         text = "\n".join(lines)
