@@ -195,3 +195,31 @@ async def cb_check_join(client, call):
         await safe_delete(call.message)
     else:
         await call.answer(TEXTS[lang]["join_fail"], show_alert=True)
+
+# ════════════════════════════════════════════════════════════
+#  "📦 ZIP YASASH" TUGMASI (qo'lda zip yasash)
+# ════════════════════════════════════════════════════════════
+@app.on_callback_query(filters.create(lambda _, __, q: q.data == "zip_now"))
+async def cb_zip_now(client, call):
+    uid     = call.from_user.id
+    chat_id = call.message.chat.id
+    await call.answer()
+
+    from fs_utils import file_count, make_zip_name
+    from batch import cancel_task
+    from zip_ops import create_and_send_zip
+
+    if file_count(uid) == 0:
+        return
+
+    # Pending avto-zip taymerini bekor qilamiz -- qo'lda bosilgani uchun
+    await cancel_task(state.user_auto_zip, uid)
+
+    # Bekor qilinayotgan zip nomlash holatini ham tozalaymiz
+    state.user_zip_naming.pop(uid, None)
+
+    sm = state.user_status_msg.pop(uid, None)
+    await safe_delete(sm)
+
+    zip_name = make_zip_name(call.from_user)
+    await create_and_send_zip(client, chat_id, uid, zip_name, auto=False)
