@@ -100,6 +100,8 @@ async def on_text(client, message):
     if uid in state.user_zip_naming:
         info = state.user_zip_naming.pop(uid, None)
         await cancel_task(state.user_auto_zip, uid)
+        if info and info.get("ask_msg"):
+            await safe_delete(info["ask_msg"])
         zip_name = sanitize_zip_name(text) or (info["default_name"] if info else f"zip_{datetime.now():%Y%m%d_%H%M%S}")
         if not zip_name:
             zip_name = info["default_name"] if info else make_zip_name(message.from_user)

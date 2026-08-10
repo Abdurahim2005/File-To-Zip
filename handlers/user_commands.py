@@ -1,4 +1,5 @@
 from datetime import datetime
+import asyncio
 
 from pyrogram import Client, filters, enums
 from pyrogram.types import Message, ChatJoinRequest, InlineKeyboardMarkup, InlineKeyboardButton
@@ -215,11 +216,27 @@ async def cb_zip_now(client, call):
     # Pending avto-zip taymerini bekor qilamiz -- qo'lda bosilgani uchun
     await cancel_task(state.user_auto_zip, uid)
 
-    # Bekor qilinayotgan zip nomlash holatini ham tozalaymiz
-    state.user_zip_naming.pop(uid, None)
-
     sm = state.user_status_msg.pop(uid, None)
     await safe_delete(sm)
 
-    zip_name = make_zip_name(call.from_user)
-    await create_and_send_zip(client, chat_id, uid, zip_name, auto=False)
+    default_name = make_zip_name(call.from_user)
+    ask = await client.send_message(
+        chat_id,
+        tx(uid, "ask_zip_name", default=default_name)
+        if "ask_zip_name" in TEXTS.get(database.get_lang(uid) or "uz", {})
+        else f"📝 ZIP uchun nom yuboring (30 soniya)\n_Yubormasangiz: `{default_name}`_",
+        parse_mode=enums.ParseMode.MARKDOWN,
+    )
+    state.user_zip_naming[uid] = {"chat_id": chat_id, "default_name": default_name, "ask_msg": ask}
+
+    async def _zip_naming_timeout():
+        await asyncio.sleep(30)
+        info = state.user_zip_naming.get(uid)
+        if info is None:
+            return  # foydalanuvchi allaqachon nom yubordi (text_router hal qildi)
+        state.user_zip_naming.pop(uid, None)
+        await safe_delete(info.get("ask_msg", ask))
+        if file_count(uid) > 0:
+            await create_and_send_zip(client, info["chat_id"], uid, info["default_name"])
+
+    asyncio.ensure_future(_zip_naming_timeout())
