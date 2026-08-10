@@ -222,9 +222,7 @@ async def cb_zip_now(client, call):
     default_name = make_zip_name(call.from_user)
     ask = await client.send_message(
         chat_id,
-        tx(uid, "ask_zip_name", default=default_name)
-        if "ask_zip_name" in TEXTS.get(database.get_lang(uid) or "uz", {})
-        else f"📝 ZIP uchun nom yuboring (30 soniya)\n_Yubormasangiz: `{default_name}`_",
+        tx(uid, "ask_zip_name", default=default_name),
         parse_mode=enums.ParseMode.MARKDOWN,
     )
     state.user_zip_naming[uid] = {"chat_id": chat_id, "default_name": default_name, "ask_msg": ask}
