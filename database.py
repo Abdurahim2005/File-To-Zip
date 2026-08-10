@@ -97,6 +97,13 @@ def init_db():
             UNIQUE(telegram_id, chat_id)
         )
     """)
+    # "Hamma uchun" global limitlarni doimiy saqlash uchun (redeploy'dan keyin ham yashaydi)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key   TEXT PRIMARY KEY,
+            value INTEGER NOT NULL
+        )
+    """)
 
     # Mavjud jadvallarda eski ustunlarni qo'shish
     for col, dfn in [("waiting_zip","INTEGER DEFAULT 0"), ("is_banned","INTEGER DEFAULT 0")]:
@@ -130,6 +137,32 @@ def init_db():
 
     c.commit()
     db_sync()
+
+    # "Hamma uchun" global limitlarni bazadan RAM'ga qaytarib yuklash
+    # (redeploy bo'lganda state.py qayta import bo'lib, o'zgaruvchilar boshlang'ich
+    # qiymatga qaytadi -- shu qatorlar bazada saqlangan oxirgi qiymatni tiklaydi)
+    _load_app_settings()
+
+def _load_app_settings():
+    rows = get_db().execute("SELECT key, value FROM app_settings").fetchall()
+    values = {k: v for k, v in rows}
+    if "default_zips_day" in values:
+        state.DEFAULT_ZIPS_DAY = values["default_zips_day"]
+    if "default_storage_bytes" in values:
+        state.DEFAULT_STORAGE = values["default_storage_bytes"]
+    if "default_compression" in values:
+        state.DEFAULT_COMPRESSION = values["default_compression"]
+    if "max_files" in values:
+        state.MAX_FILES = values["max_files"]
+
+def _save_app_setting(key: str, value: int):
+    c = get_db()
+    c.execute(
+        "INSERT INTO app_settings(key,value) VALUES(?,?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (key, value),
+    )
+    c.commit(); db_sync()
 
 # ── Users ────────────────────────────────────────────────
 def upsert_user(user, lang=None):
@@ -234,12 +267,14 @@ def set_all_users_compression(level: int):
     c.execute("UPDATE user_limits SET compression_level=?", (level,))
     state.DEFAULT_COMPRESSION = level
     c.commit(); db_sync()
+    _save_app_setting("default_compression", level)
 
 def set_all_users_zip_limit(limit: int):
     c = get_db()
     c.execute("UPDATE user_limits SET max_zips_day=?", (limit,))
     state.DEFAULT_ZIPS_DAY = limit
     c.commit(); db_sync()
+    _save_app_setting("default_zips_day", limit)
 
 def set_all_users_storage_limit(mb: int):
     storage_bytes = mb * 1024 * 1024
@@ -247,6 +282,7 @@ def set_all_users_storage_limit(mb: int):
     c.execute("UPDATE user_limits SET max_storage_bytes=?", (storage_bytes,))
     state.DEFAULT_STORAGE = storage_bytes
     c.commit(); db_sync()
+    _save_app_setting("default_storage_bytes", storage_bytes)
 
 def reset_all_limits():
     c = get_db()
@@ -254,6 +290,8 @@ def reset_all_limits():
     state.DEFAULT_ZIPS_DAY = ORIGINAL_MAX_ZIPS_DAY
     state.DEFAULT_STORAGE = ORIGINAL_MAX_STORAGE
     state.DEFAULT_COMPRESSION = ORIGINAL_COMPRESSION
+    state.MAX_FILES = 20
+    c.execute("DELETE FROM app_settings")
     c.commit(); db_sync()
 
 def reset_user_limits(uid: int):
@@ -288,6 +326,7 @@ def set_all_users_max_files(limit: int):
     c.execute("UPDATE user_limits SET max_files_per_zip=?", (limit,))
     state.MAX_FILES = limit
     c.commit(); db_sync()
+    _save_app_setting("max_files", limit)
 
 # ── Channels ─────────────────────────────────────────────
 def _load_channels():
