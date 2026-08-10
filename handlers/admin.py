@@ -362,6 +362,36 @@ async def adm_set_storage_limit(client, call):
                              parse_mode=enums.ParseMode.MARKDOWN)
     await call.answer()
 
+@app.on_callback_query(admin_filter & filters.create(lambda _, __, q: q.data == "adm_all_zip_limit"))
+async def adm_all_zip_limit(client, call):
+    state.waiting_for_user_id[ADMIN_ID] = "set_all_zip_limit"
+    await call.message.reply("📦 *Hamma uchun kunlik ZIP limiti*\n\nFaqat son yuboring.\nMisol: `10`\n\n"
+                             "_(0 = cheksiz)_",
+                             parse_mode=enums.ParseMode.MARKDOWN)
+    await call.answer()
+
+@app.on_callback_query(admin_filter & filters.create(lambda _, __, q: q.data == "adm_all_storage_limit"))
+async def adm_all_storage_limit(client, call):
+    state.waiting_for_user_id[ADMIN_ID] = "set_all_storage_limit"
+    await call.message.reply("💾 *Hamma uchun xotira limiti*\n\nFaqat MB yuboring.\nMisol: `1024`\n\n"
+                             "_(1-2048 MB, ya'ni 1 MB dan 2 GB gacha)_",
+                             parse_mode=enums.ParseMode.MARKDOWN)
+    await call.answer()
+
+@app.on_callback_query(admin_filter & filters.create(lambda _, __, q: q.data == "adm_set_file_limit"))
+async def adm_set_file_limit(client, call):
+    state.waiting_for_user_id[ADMIN_ID] = "set_file_limit"
+    await call.message.reply("📎 *Foydalanuvchi fayl limiti*\n\nFormat: `USER_ID LIMIT`\nMisol: `123456789 20`",
+                             parse_mode=enums.ParseMode.MARKDOWN)
+    await call.answer()
+
+@app.on_callback_query(admin_filter & filters.create(lambda _, __, q: q.data == "adm_all_file_limit"))
+async def adm_all_file_limit(client, call):
+    state.waiting_for_user_id[ADMIN_ID] = "set_all_file_limit"
+    await call.message.reply("📎 *Hamma uchun fayl limiti*\n\nFaqat son yuboring.\nMisol: `20`",
+                             parse_mode=enums.ParseMode.MARKDOWN)
+    await call.answer()
+
 @app.on_callback_query(admin_filter & filters.create(lambda _, __, q: q.data == "adm_reset_limits"))
 async def adm_reset_limits(client, call):
     state.waiting_for_user_id[ADMIN_ID] = "reset_limits"
