@@ -1,0 +1,197 @@
+from datetime import datetime
+
+from pyrogram import Client, filters, enums
+from pyrogram.types import Message, ChatJoinRequest, InlineKeyboardMarkup, InlineKeyboardButton
+
+import database
+import state
+from config import ADMIN_ID
+from bot_instance import app
+from texts import TEXTS, tx
+from keyboards import main_keyboard
+from helpers import safe_delete, send_sticker
+from subscription import gate_check, check_subscription
+
+# ════════════════════════════════════════════════════════════
+#  /start buyrug'i
+# ════════════════════════════════════════════════════════════
+@app.on_message(filters.command("start"))
+async def cmd_start(client, message):
+    uid = message.from_user.id
+    await safe_delete(message)
+
+    if database.is_banned(uid):
+        return
+
+    lang = database.get_lang(uid)
+
+    if lang is not None:
+        # 1. AGAR TIL OLDIN TANLANGAN BO'LSA: To'g'ridan-to'g'ri Welcome xabarini chiqaramiz
+        name = message.from_user.first_name or "Foydalanuvchi"
+
+        # Eski welcome xabarini tozalaymiz
+        old_wm = state.user_welcome_msg.pop(uid, None)
+        await safe_delete(old_wm)
+
+        sent = await client.send_message(
+            message.chat.id,
+            tx(uid, "welcome", name=name),
+            parse_mode=enums.ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton(TEXTS[lang]["change_lang"], callback_data="change_lang")
+            ]]),
+        )
+        state.user_welcome_msg[uid] = sent
+        await send_sticker(client, message.chat.id, "start")
+
+        # Pastdagi asosiy menyu klaviaturasini chiqarish
+        await client.send_message(
+            message.chat.id, "👇",
+            reply_markup=main_keyboard(uid),
+        )
+
+        # Kanallarni tekshirish (majburiy obuna)
+        if state.required_channels:
+            await gate_check(client, uid, message.chat.id, lang)
+
+    else:
+        # 2. AGAR TIL TANLANMAGAN BO'LSA (Birinchi marta kirganda): Til tanlash tugmalari chiqadi
+        sent = await client.send_message(
+            message.chat.id,
+            "🌐 Tilni tanlang / Choose language:",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🇺🇿 O'zbek", callback_data="setlang_uz"),
+                InlineKeyboardButton("🇬🇧 English", callback_data="setlang_en"),
+            ]]),
+        )
+        state.user_welcome_msg[uid] = sent
+
+# ════════════════════════════════════════════════════════════
+#  /language buyrug'i (Tilni xohlagan paytda o'zgartirish)
+# ════════════════════════════════════════════════════════════
+@app.on_message(filters.command(["language", "lang"]) & filters.private)
+async def cmd_change_lang(client, message: Message):
+    uid = message.from_user.id
+    await safe_delete(message)
+
+    if database.is_banned(uid):
+        return
+
+    await client.send_message(
+        message.chat.id,
+        "🌐 Yangi tilni tanlang / Choose a new language:",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("🇺🇿 O'zbek", callback_data="setlang_uz"),
+            InlineKeyboardButton("🇬🇧 English", callback_data="setlang_en"),
+        ]]),
+    )
+
+@app.on_message(filters.forwarded & filters.user(ADMIN_ID))
+async def on_forwarded(client, message):
+    # Faqat kanaldan forward qilingan bo'lsa
+    if message.forward_from_chat and message.forward_from_chat.type == enums.ChatType.CHANNEL:
+        chat = message.forward_from_chat
+        title = chat.title or str(chat.id)
+        username = chat.username or ""
+        chat_id = chat.id
+
+        # Agar allaqachon qo'shilgan bo'lsa
+        if chat_id in state.required_channels:
+            await message.reply("Bu kanal allaqachon qo‘shilgan.")
+            return
+
+        if not username:
+            # Maxfiy kanal (username yo'q)
+            database.add_channel(chat_id, title, is_private=1)
+            state.awaiting_invite_link[chat_id] = ADMIN_ID
+            await message.reply(
+                f"✅ Maxfiy kanal qo‘shildi: *{title}*\n"
+                f"Endi menga foydalanuvchilarga ko‘rinadigan **taklif havolasini** yuboring (masalan, `https://t.me/+xxx`).",
+                parse_mode=enums.ParseMode.MARKDOWN
+            )
+        else:
+            # Publik kanal (username bor) – avtomatik qo‘shamiz
+            database.add_channel(chat_id, title, username=username)
+            await message.reply(
+                f"✅ Publik kanal qo‘shildi: *{title}*\n"
+                f"🔗 @{username}",
+                parse_mode=enums.ParseMode.MARKDOWN
+            )
+    else:
+        await message.reply("Iltimos, faqat kanaldan forward qilingan post yuboring.")
+
+@app.on_chat_join_request()
+async def handle_join_request(client: Client, join_request: ChatJoinRequest):
+    # Ma'lumotlar bazasiga ulanish
+    c = database.get_db()
+
+    c.execute("""
+        INSERT OR IGNORE INTO join_requests(telegram_id, chat_id, created_at)
+        VALUES(?,?,?)
+    """, (
+        join_request.from_user.id,
+        join_request.chat.id,
+        datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ))
+    c.commit()
+    database.db_sync()
+# ════════════════════════════════════════════════════════════
+#  TIL TANLASH
+# ════════════════════════════════════════════════════════════
+@app.on_callback_query(filters.create(lambda _, __, q: q.data.startswith("setlang_")))
+async def cb_set_lang(client, call):
+    uid  = call.from_user.id
+    lang = call.data.split("_")[1]
+    database.upsert_user(call.from_user, lang)
+    await safe_delete(call.message)
+    state.user_welcome_msg.pop(uid, None)
+    name = call.from_user.first_name or "Foydalanuvchi"
+    sent = await client.send_message(
+        call.message.chat.id,
+        tx(uid, "welcome", name=name),
+        parse_mode=enums.ParseMode.MARKDOWN,
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton(TEXTS[lang]["change_lang"], callback_data="change_lang")
+        ]]),
+    )
+    state.user_welcome_msg[uid] = sent
+    await send_sticker(client, call.message.chat.id, "start")
+    await call.answer(TEXTS[lang]["lang_set"])
+    # Send main keyboard
+    await client.send_message(
+        call.message.chat.id, "👇",
+        reply_markup=main_keyboard(uid),
+    )
+    if state.required_channels:
+        await gate_check(client, uid, call.message.chat.id, lang)
+
+
+
+@app.on_callback_query(filters.create(lambda _, __, q: q.data == "change_lang"))
+async def cb_change_lang(client, call):
+    uid = call.from_user.id
+    await safe_delete(call.message)
+    sent = await client.send_message(
+        call.message.chat.id,
+        TEXTS["uz"]["choose_lang"],
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("🇺🇿 O'zbek", callback_data="setlang_uz"),
+            InlineKeyboardButton("🇬🇧 English", callback_data="setlang_en"),
+        ]]),
+    )
+    state.user_welcome_msg[uid] = sent
+    await call.answer()
+
+# ════════════════════════════════════════════════════════════
+#  OBUNA TEKSHIRISH
+# ════════════════════════════════════════════════════════════
+@app.on_callback_query(filters.create(lambda _, __, q: q.data == "check_join"))
+async def cb_check_join(client, call):
+    uid  = call.from_user.id
+    lang = database.get_lang(uid) or "uz"
+    not_joined = await check_subscription(client, uid)
+    if not not_joined:
+        await call.answer(TEXTS[lang]["join_ok"], show_alert=True)
+        await safe_delete(call.message)
+    else:
+        await call.answer(TEXTS[lang]["join_fail"], show_alert=True)
