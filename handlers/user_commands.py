@@ -208,7 +208,7 @@ async def cb_zip_now(client, call):
 
     from fs_utils import file_count, make_zip_name
     from batch import cancel_task
-    from zip_ops import create_and_send_zip
+    from zip_ops import ask_password_step
 
     if file_count(uid) == 0:
         return
@@ -235,6 +235,63 @@ async def cb_zip_now(client, call):
         state.user_zip_naming.pop(uid, None)
         await safe_delete(info.get("ask_msg", ask))
         if file_count(uid) > 0:
-            await create_and_send_zip(client, info["chat_id"], uid, info["default_name"])
+            await ask_password_step(client, info["chat_id"], uid, info["default_name"])
 
     asyncio.ensure_future(_zip_naming_timeout())
+
+# ════════════════════════════════════════════════════════════
+#  "PAROL QO'YASIZMI?" - Ha / Yo'q tugmalari
+# ════════════════════════════════════════════════════════════
+@app.on_callback_query(filters.create(lambda _, __, q: q.data == "pw_no"))
+async def cb_pw_no(client, call):
+    uid = call.from_user.id
+    await call.answer()
+
+    from fs_utils import file_count
+    from zip_ops import create_and_send_zip
+
+    info = state.user_pw_asking.pop(uid, None)
+    if info:
+        await safe_delete(info.get("ask_msg"))
+    if info and file_count(uid) > 0:
+        await create_and_send_zip(client, info["chat_id"], uid, info["zip_name"])
+
+
+@app.on_callback_query(filters.create(lambda _, __, q: q.data == "pw_yes"))
+async def cb_pw_yes(client, call):
+    uid     = call.from_user.id
+    chat_id = call.message.chat.id
+    await call.answer()
+
+    from fs_utils import file_count
+    from zip_ops import create_and_send_zip
+
+    info = state.user_pw_asking.get(uid)
+    if not info:
+        return
+    if file_count(uid) == 0:
+        state.user_pw_asking.pop(uid, None)
+        return
+
+    if not database.can_use_pw_zip_today(uid):
+        state.user_pw_asking.pop(uid, None)
+        await safe_delete(info.get("ask_msg"))
+        await client.send_message(chat_id, tx(uid, "pw_limit_over"), parse_mode=enums.ParseMode.MARKDOWN)
+        await create_and_send_zip(client, chat_id, uid, info["zip_name"])
+        return
+
+    await safe_delete(info.get("ask_msg"))
+    ask = await client.send_message(chat_id, tx(uid, "ask_password"), parse_mode=enums.ParseMode.MARKDOWN)
+    state.user_pw_asking[uid] = {"chat_id": chat_id, "zip_name": info["zip_name"], "ask_msg": ask, "stage": "password"}
+
+    async def _password_timeout():
+        await asyncio.sleep(30)
+        cur = state.user_pw_asking.get(uid)
+        if cur is None or cur.get("stage") != "password":
+            return
+        state.user_pw_asking.pop(uid, None)
+        await safe_delete(cur.get("ask_msg"))
+        if file_count(uid) > 0:
+            await create_and_send_zip(client, cur["chat_id"], uid, cur["zip_name"])
+
+    asyncio.ensure_future(_password_timeout())

@@ -324,6 +324,8 @@ async def adm_limits(client, call):
             InlineKeyboardButton("📎 Hamma uchun fayl limiti", callback_data="adm_all_file_limit")],
             [InlineKeyboardButton("⭐ Premium yoqish", callback_data="adm_premium_on"),
             InlineKeyboardButton("❌ Premium bekor qilish", callback_data="adm_premium_off")],
+            [InlineKeyboardButton("🔐 Foydalanuvchi parol limiti", callback_data="adm_set_pw_limit"),
+            InlineKeyboardButton("🔐 Hamma uchun parol limiti", callback_data="adm_all_pw_limit")],
         ]),
     )
     await call.answer()
@@ -389,6 +391,20 @@ async def adm_set_file_limit(client, call):
 async def adm_all_file_limit(client, call):
     state.waiting_for_user_id[ADMIN_ID] = "set_all_file_limit"
     await call.message.reply("📎 *Hamma uchun fayl limiti*\n\nFaqat son yuboring.\nMisol: `20`",
+                             parse_mode=enums.ParseMode.MARKDOWN)
+    await call.answer()
+
+@app.on_callback_query(admin_filter & filters.create(lambda _, __, q: q.data == "adm_set_pw_limit"))
+async def adm_set_pw_limit(client, call):
+    state.waiting_for_user_id[ADMIN_ID] = "set_pw_limit"
+    await call.message.reply("🔐 *Foydalanuvchi kunlik parol limiti*\n\nFormat: `USER_ID LIMIT`\nMisol: `123456789 5`",
+                             parse_mode=enums.ParseMode.MARKDOWN)
+    await call.answer()
+
+@app.on_callback_query(admin_filter & filters.create(lambda _, __, q: q.data == "adm_all_pw_limit"))
+async def adm_all_pw_limit(client, call):
+    state.waiting_for_user_id[ADMIN_ID] = "set_all_pw_limit"
+    await call.message.reply("🔐 *Hamma uchun kunlik parol limiti*\n\nFaqat son yuboring.\nMisol: `1`",
                              parse_mode=enums.ParseMode.MARKDOWN)
     await call.answer()
 

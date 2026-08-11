@@ -15,7 +15,7 @@ from texts import tx
 from fs_utils import file_count, disk_used, fmt_size, sanitize_zip_name, make_zip_name
 from helpers import safe_delete
 from batch import cancel_task
-from zip_ops import create_and_send_zip
+from zip_ops import create_and_send_zip, ask_password_step
 
 # ════════════════════════════════════════════════════════════
 #  ADMIN MATN HANDLERI (TO\'LIQ)
@@ -109,7 +109,20 @@ async def on_text(client, message):
         if info and file_count(uid) > 0:
             sm = state.user_status_msg.pop(uid, None)
             await safe_delete(sm)
-            await create_and_send_zip(client, info["chat_id"], uid, zip_name)
+            await ask_password_step(client, info["chat_id"], uid, zip_name)
+        return
+
+    # ── ZIP password input ──
+    if uid in state.user_pw_asking and state.user_pw_asking[uid].get("stage") == "password":
+        info = state.user_pw_asking.pop(uid, None)
+        await safe_delete(message)
+        if info and info.get("ask_msg"):
+            await safe_delete(info["ask_msg"])
+        password = text.strip()
+        if not password:
+            password = None
+        if info and file_count(uid) > 0:
+            await create_and_send_zip(client, info["chat_id"], uid, info["zip_name"], password=password)
         return
 
 
@@ -196,6 +209,7 @@ async def on_text(client, message):
             try:
                 target_id = int(re.search(r"\d+", raw).group()) # type: ignore
                 database.reset_user_limits(target_id)
+                database.set_user_premium(target_id, False)
                 await message.reply(f"✅ `{target_id}` limiti standartga qaytarildi.",
                                     parse_mode=enums.ParseMode.MARKDOWN)
             except Exception:
@@ -265,6 +279,29 @@ async def on_text(client, message):
             except Exception:
                 await message.reply("❌ Butun son yuboring")
             return
+
+        if action == "set_pw_limit":
+            parts = raw.split()
+            if len(parts) < 2:
+                await message.reply("❌ Format: `USER_ID LIMIT`")
+                return
+            try:
+                target_id = int(parts[0])
+                limit_val = int(parts[1])
+                database.set_user_pw_zip_limit(target_id, limit_val)
+                await message.reply(f"✅ `{target_id}` uchun kunlik parol limiti: *{limit_val}* ta")
+            except Exception:
+                await message.reply("❌ Xato. Format: `USER_ID LIMIT`")
+            return
+
+        if action == "set_all_pw_limit":
+            try:
+                limit_val = int(raw)
+                database.set_all_users_pw_zip_limit(limit_val)
+                await message.reply(f"✅ Hamma uchun kunlik parol limiti: *{limit_val}* ta")
+            except Exception:
+                await message.reply("❌ Butun son yuboring")
+            return
         if action == "premium_on":
             try:
                 target_id = int(raw)
@@ -275,6 +312,7 @@ async def on_text(client, message):
                 database.set_user_storage_limit(target_id, 1024 * 1024 * 1024)  # 1 GB
                 database.set_user_max_files(target_id, 40)           # 40 ta fayl
                 database.set_user_compression(target_id, 6)          # o‘rta siqish
+                database.set_user_premium(target_id, True)           # parol qo'yish: kuniga 5 marta
                 
                 await message.reply(
                     f"✅ Premium yoqildi!\n"
@@ -316,6 +354,7 @@ async def on_text(client, message):
                 target_lang = database.get_lang(target_id) or "uz"
                 
                 database.reset_user_limits(target_id)
+                database.set_user_premium(target_id, False)
                 
                 await message.reply(
                     f"✅ Premium bekor qilindi!\n"
