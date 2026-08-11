@@ -14,6 +14,13 @@ DEFAULT_STORAGE       = ORIGINAL_MAX_STORAGE
 DEFAULT_COMPRESSION   = ORIGINAL_COMPRESSION
 DEFAULT_PW_ZIPS_DAY   = ORIGINAL_PW_ZIPS_DAY   # "hamma uchun" standart kunlik parol-zip limiti
 
+# Admin panel orqali qayta belgilanadigan Premium sozlamalari
+PREMIUM_ZIPS_DAY      = 10
+PREMIUM_STORAGE_MB    = 1024
+PREMIUM_FILES         = 40
+PREMIUM_COMPRESSION   = 6
+PREMIUM_PW_ZIPS_DAY   = 10
+
 MAX_FILES     = 20
 
 # ════════════════════════════════════════════════════════════

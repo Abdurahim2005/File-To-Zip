@@ -172,6 +172,16 @@ def _load_app_settings():
         state.MAX_FILES = values["max_files"]
     if "pw_zips_day" in values:
         state.DEFAULT_PW_ZIPS_DAY = values["pw_zips_day"]
+    if "prem_zips_day" in values:
+        state.PREMIUM_ZIPS_DAY = values["prem_zips_day"]
+    if "prem_storage_mb" in values:
+        state.PREMIUM_STORAGE_MB = values["prem_storage_mb"]
+    if "prem_files" in values:
+        state.PREMIUM_FILES = values["prem_files"]
+    if "prem_compression" in values:
+        state.PREMIUM_COMPRESSION = values["prem_compression"]
+    if "prem_pw_zips_day" in values:
+        state.PREMIUM_PW_ZIPS_DAY = values["prem_pw_zips_day"]
 
 def _save_app_setting(key: str, value: int):
     c = get_db()
@@ -531,3 +541,37 @@ def set_user_premium(uid: int, premium: bool):
             (uid, state.DEFAULT_ZIPS_DAY, state.DEFAULT_STORAGE, state.DEFAULT_COMPRESSION, val),
         )
     c.commit(); db_sync()
+
+# ════════════════════════════════════════════════════════════
+#  PREMIUM SOZLAMALARI (admin panel orqali qayta belgilanadi, bazada saqlanadi)
+# ════════════════════════════════════════════════════════════
+def get_premium_settings() -> dict:
+    return {
+        "zips_day":   state.PREMIUM_ZIPS_DAY,
+        "storage_mb": state.PREMIUM_STORAGE_MB,
+        "files":      state.PREMIUM_FILES,
+        "compression": state.PREMIUM_COMPRESSION,
+        "pw_zips_day": state.PREMIUM_PW_ZIPS_DAY,
+    }
+
+def set_premium_settings(zips_day: int, storage_mb: int, files: int, compression: int, pw_zips_day: int):
+    state.PREMIUM_ZIPS_DAY = zips_day
+    state.PREMIUM_STORAGE_MB = storage_mb
+    state.PREMIUM_FILES = files
+    state.PREMIUM_COMPRESSION = compression
+    state.PREMIUM_PW_ZIPS_DAY = pw_zips_day
+    _save_app_setting("prem_zips_day", zips_day)
+    _save_app_setting("prem_storage_mb", storage_mb)
+    _save_app_setting("prem_files", files)
+    _save_app_setting("prem_compression", compression)
+    _save_app_setting("prem_pw_zips_day", pw_zips_day)
+
+def apply_premium(uid: int):
+    """Joriy saqlangan Premium sozlamalarini foydalanuvchiga o'rnatadi."""
+    s = get_premium_settings()
+    set_user_zip_limit(uid, s["zips_day"])
+    set_user_storage_limit(uid, s["storage_mb"] * 1024 * 1024)
+    set_user_max_files(uid, s["files"])
+    set_user_compression(uid, s["compression"])
+    set_user_pw_zip_limit(uid, s["pw_zips_day"])
+    set_user_premium(uid, True)
