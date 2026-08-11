@@ -122,6 +122,22 @@ def init_db():
     except Exception:
         pass
     try:
+        c.execute("ALTER TABLE user_limits ADD COLUMN pw_zips_day INTEGER DEFAULT NULL")
+    except Exception:
+        pass
+    try:
+        c.execute("ALTER TABLE user_limits ADD COLUMN pw_zips_used INTEGER DEFAULT 0")
+    except Exception:
+        pass
+    try:
+        c.execute("ALTER TABLE user_limits ADD COLUMN pw_zips_date TEXT DEFAULT ''")
+    except Exception:
+        pass
+    try:
+        c.execute("ALTER TABLE user_limits ADD COLUMN is_premium INTEGER DEFAULT 0")
+    except Exception:
+        pass
+    try:
         c.execute("ALTER TABLE channels ADD COLUMN is_external INTEGER DEFAULT 0")
     except Exception:
         pass
@@ -154,6 +170,8 @@ def _load_app_settings():
         state.DEFAULT_COMPRESSION = values["default_compression"]
     if "max_files" in values:
         state.MAX_FILES = values["max_files"]
+    if "pw_zips_day" in values:
+        state.DEFAULT_PW_ZIPS_DAY = values["pw_zips_day"]
 
 def _save_app_setting(key: str, value: int):
     c = get_db()
@@ -291,6 +309,8 @@ def reset_all_limits():
     state.DEFAULT_STORAGE = ORIGINAL_MAX_STORAGE
     state.DEFAULT_COMPRESSION = ORIGINAL_COMPRESSION
     state.MAX_FILES = 20
+    from config import ORIGINAL_PW_ZIPS_DAY
+    state.DEFAULT_PW_ZIPS_DAY = ORIGINAL_PW_ZIPS_DAY
     c.execute("DELETE FROM app_settings")
     c.commit(); db_sync()
 
@@ -424,3 +444,90 @@ def get_pending_donations() -> list:
         "SELECT id, telegram_id, first_name, amount, currency, created_at "
         "FROM donations WHERE confirmed=0 ORDER BY id DESC LIMIT 20"
     ).fetchall()
+
+# ════════════════════════════════════════════════════════════
+#  ZIPGA PAROL QO'YISH -- kunlik limit boshqaruvi
+# ════════════════════════════════════════════════════════════
+def is_premium(uid: int) -> bool:
+    r = get_db().execute(
+        "SELECT is_premium FROM user_limits WHERE telegram_id=?", (uid,)
+    ).fetchone()
+    return bool(r and r[0])
+
+def get_user_pw_zip_limit(uid: int) -> int:
+    """Foydalanuvchining kunlik parol-zip limitini qaytaradi.
+    Individual sozlangan bo'lsa o'shani, aks holda global standartni ishlatadi."""
+    r = get_db().execute(
+        "SELECT pw_zips_day FROM user_limits WHERE telegram_id=?", (uid,)
+    ).fetchone()
+    if r and r[0] is not None:
+        return r[0]
+    return state.DEFAULT_PW_ZIPS_DAY
+
+def get_pw_zips_used_today(uid: int) -> int:
+    today = datetime.now().strftime("%Y-%m-%d")
+    r = get_db().execute(
+        "SELECT pw_zips_used, pw_zips_date FROM user_limits WHERE telegram_id=?", (uid,)
+    ).fetchone()
+    if not r:
+        return 0
+    used, saved_date = r
+    if saved_date != today:
+        return 0
+    return used or 0
+
+def can_use_pw_zip_today(uid: int) -> bool:
+    return get_pw_zips_used_today(uid) < get_user_pw_zip_limit(uid)
+
+def register_pw_zip_used(uid: int):
+    """Bugungi parol-zip hisoblagichini +1 qiladi (kun almashsa 0 dan boshlaydi)."""
+    today = datetime.now().strftime("%Y-%m-%d")
+    c = get_db()
+    existing = c.execute("SELECT telegram_id, pw_zips_used, pw_zips_date FROM user_limits WHERE telegram_id=?", (uid,)).fetchone()
+    if not existing:
+        c.execute(
+            "INSERT INTO user_limits(telegram_id,max_zips_day,max_storage_bytes,compression_level,pw_zips_used,pw_zips_date) "
+            "VALUES(?,?,?,?,?,?)",
+            (uid, state.DEFAULT_ZIPS_DAY, state.DEFAULT_STORAGE, state.DEFAULT_COMPRESSION, 1, today),
+        )
+    else:
+        _, used, saved_date = existing
+        new_used = 1 if saved_date != today else (used or 0) + 1
+        c.execute("UPDATE user_limits SET pw_zips_used=?, pw_zips_date=? WHERE telegram_id=?", (new_used, today, uid))
+    c.commit(); db_sync()
+
+def set_user_pw_zip_limit(uid: int, limit: int):
+    """Bitta foydalanuvchi uchun kunlik parol-zip limitini o'rnatish."""
+    c = get_db()
+    existing = c.execute("SELECT telegram_id FROM user_limits WHERE telegram_id=?", (uid,)).fetchone()
+    if existing:
+        c.execute("UPDATE user_limits SET pw_zips_day=? WHERE telegram_id=?", (limit, uid))
+    else:
+        c.execute(
+            "INSERT INTO user_limits(telegram_id,max_zips_day,max_storage_bytes,compression_level,pw_zips_day) "
+            "VALUES(?,?,?,?,?)",
+            (uid, state.DEFAULT_ZIPS_DAY, state.DEFAULT_STORAGE, state.DEFAULT_COMPRESSION, limit),
+        )
+    c.commit(); db_sync()
+
+def set_all_users_pw_zip_limit(limit: int):
+    """Hamma uchun (individual sozlanmagan) standart kunlik parol-zip limitini o'rnatish."""
+    state.DEFAULT_PW_ZIPS_DAY = limit
+    c = get_db()
+    # faqat individual moslashtirilmagan foydalanuvchilarga (NULL) global qiymat ta'sir qiladi -- bu tabiiy ravishda ishlaydi
+    c.commit(); db_sync()
+    _save_app_setting("pw_zips_day", limit)
+
+def set_user_premium(uid: int, premium: bool):
+    c = get_db()
+    existing = c.execute("SELECT telegram_id FROM user_limits WHERE telegram_id=?", (uid,)).fetchone()
+    val = 1 if premium else 0
+    if existing:
+        c.execute("UPDATE user_limits SET is_premium=? WHERE telegram_id=?", (val, uid))
+    else:
+        c.execute(
+            "INSERT INTO user_limits(telegram_id,max_zips_day,max_storage_bytes,compression_level,is_premium) "
+            "VALUES(?,?,?,?,?)",
+            (uid, state.DEFAULT_ZIPS_DAY, state.DEFAULT_STORAGE, state.DEFAULT_COMPRESSION, val),
+        )
+    c.commit(); db_sync()

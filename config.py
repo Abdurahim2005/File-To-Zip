@@ -19,6 +19,8 @@ ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "Abdurahim0525")  # @ belgisiz
 ORIGINAL_MAX_ZIPS_DAY = 3
 ORIGINAL_MAX_STORAGE  = 314572800   # 300 MB
 ORIGINAL_COMPRESSION  = 0           # siqilmasin
+ORIGINAL_PW_ZIPS_DAY  = 1           # oddiy foydalanuvchi: kuniga 1 marta parolli zip
+PREMIUM_PW_ZIPS_DAY   = 5           # premium: kuniga 5 marta parolli zip
 
 AUTO_ZIP_DELAY = 40
 DEBOUNCE_SEC  = 1.5

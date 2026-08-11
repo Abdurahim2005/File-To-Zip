@@ -1,6 +1,6 @@
 import asyncio
 
-from config import ORIGINAL_MAX_ZIPS_DAY, ORIGINAL_MAX_STORAGE, ORIGINAL_COMPRESSION
+from config import ORIGINAL_MAX_ZIPS_DAY, ORIGINAL_MAX_STORAGE, ORIGINAL_COMPRESSION, ORIGINAL_PW_ZIPS_DAY
 
 # ════════════════════════════════════════════════════════════
 #  RUNTIME-MUTABLE SETTINGS
@@ -12,6 +12,7 @@ from config import ORIGINAL_MAX_ZIPS_DAY, ORIGINAL_MAX_STORAGE, ORIGINAL_COMPRES
 DEFAULT_ZIPS_DAY      = ORIGINAL_MAX_ZIPS_DAY
 DEFAULT_STORAGE       = ORIGINAL_MAX_STORAGE
 DEFAULT_COMPRESSION   = ORIGINAL_COMPRESSION
+DEFAULT_PW_ZIPS_DAY   = ORIGINAL_PW_ZIPS_DAY   # "hamma uchun" standart kunlik parol-zip limiti
 
 MAX_FILES     = 20
 
@@ -37,6 +38,7 @@ awaiting_invite_link: dict = {}   # chat_id -> admin_id (taklif havolasi kutilmo
 user_donating:       dict = {}
 admin_reply_to:      dict = {}
 user_zip_naming:     dict = {}
+user_pw_asking:      dict = {}   # uid -> {"chat_id","zip_name"} -- parol kiritilishi kutilmoqda
 _user_file_locks:    dict = {}
 
 user_batch_timer:   dict = {}   # uid -> asyncio.Task (1.5 sekundlik taymer)

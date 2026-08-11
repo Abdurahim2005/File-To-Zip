@@ -20,7 +20,8 @@ TEXTS = {
             "📋 *Cheklovlar:*\n"
             "• Max *{max_files} ta fayl* (bir ZIP uchun)\n"
             "• Max *{max_storage} MB* umumiy hajm\n"
-            "• Kuniga *{max_zips} ta ZIP*"
+            "• Kuniga *{max_zips} ta ZIP*\n"
+            "• Kuniga *{pw_zips} ta parolli ZIP* 🔐"
         ),
         "files_saved":  "✅ *{count} ta fayl* qabul qilindi!\n\n👇 ZIP yasash tugmasini bosing:",
         "receiving":    "📥 *Fayllar qabul qilinmoqda...*",
@@ -33,6 +34,13 @@ TEXTS = {
         "storage_full": "⚠️ *Xotira to'lib qoldi!*\n\n📄 Oxirgi fayl: `{last_file}`\n💾 Band: *{used}* / *{max}*\n\nZIP yasash tugmasini bosing — 40 soniyada avto-zip.",
         "ready_btn":    "📦 ZIP yasash",
         "ask_zip_name": "📝 ZIP uchun nom yuboring (30 soniya)\n_Yubormasangiz: `{default}`_",
+        "ask_pw_yesno": "🔐 ZIP'ga parol qo'yishni xohlaysizmi?",
+        "pw_yes_btn":   "🔐 Ha, parol qo'yaman",
+        "pw_no_btn":    "📦 Yo'q, oddiy ziplansin",
+        "ask_password": "🔑 ZIP uchun parol yuboring (30 soniya)\n_Yubormasangiz: parolsiz ziplanadi_",
+        "pw_limit_over": "⚠️ Bugungi parol qo'yish imkoniyatingiz tugadi.\n📦 Oddiy ziplab beraman.",
+        "pw_left":      "🔐 Bugun yana *{left}* marta parol qo'yish imkoniyatingiz bor.",
+        "zip_pw_locked": "🔐 *Ushbu ZIP parol bilan qulflangan*",
         "zip_wait":     "⏳ *Fayllar hali yuklanmoqda...* biroz kuting.",
         "zip_queue":    "⏳ *Navbatda...* ZIP jarayoni band, kuting.",
         "zip_caption":  "📦 *ZIP tayyor!*\n🤖 @Zipla_bot — Hayotni Ziplab o't!",
@@ -128,7 +136,8 @@ TEXTS = {
             "📋 *Limits:*\n"
             "• Max *{max_files} files* per ZIP\n"
             "• Max *{max_storage} MB* total size\n"
-            "• *{max_zips} ZIPs* per day"
+            "• *{max_zips} ZIPs* per day\n"
+            "• *{pw_zips} password ZIPs* per day 🔐"
         ),
         "contact_text": "📞 Click the button below to contact the admin:",
         "files_saved":  "✅ *{count} file(s)* received!\n\n👇 Press Create ZIP when ready:",
@@ -142,6 +151,13 @@ TEXTS = {
         "storage_full": "⚠️ *Storage full!*\n\n📄 Last file: `{last_file}`\n💾 Used: *{used}* of *{max}*\n\nPress Create ZIP — auto-zip in 40 seconds.",
         "ready_btn":    "📦 Create ZIP",
         "ask_zip_name": "📝 Send a name for the ZIP (30 sec)\n_If you don't: `{default}`_",
+        "ask_pw_yesno": "🔐 Do you want to protect the ZIP with a password?",
+        "pw_yes_btn":   "🔐 Yes, set a password",
+        "pw_no_btn":    "📦 No, just zip it",
+        "ask_password": "🔑 Send a password for the ZIP (30 sec)\n_If you don't: it will be zipped without a password_",
+        "pw_limit_over": "⚠️ You've used today's password limit.\n📦 I'll zip it without a password.",
+        "pw_left":      "🔐 You have *{left}* password-protected ZIP(s) left today.",
+        "zip_pw_locked": "🔐 *This ZIP is password-protected*",
         "zip_wait":     "⏳ *Files still uploading...* please wait.",
         "zip_queue":    "⏳ *In queue...* ZIP process is busy, please wait.",
         "zip_caption":  "📦 *ZIP is ready!*\n🤖 @Zipla_bot — Zip your life!",
@@ -229,5 +245,8 @@ def tx(uid: int, key: str, **kw) -> str:
         if 'max_storage' not in kw:
             # Baytni MB ga o'giramiz: 314572800 / 1024 / 1024 = 300
             kw['max_storage'] = int(max_storage / 1024 / 1024)
-            
+
+    if 'pw_zips' not in kw:
+        kw['pw_zips'] = database.get_user_pw_zip_limit(uid) if uid else state.DEFAULT_PW_ZIPS_DAY
+
     return text.format(**kw)
