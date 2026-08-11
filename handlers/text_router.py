@@ -53,9 +53,17 @@ async def on_text(client, message):
     if text == "⭐ Premium":
         await safe_delete(message)
         lang = database.get_lang(uid) or "uz"
+        reg_zips, reg_storage = state.DEFAULT_ZIPS_DAY, int(state.DEFAULT_STORAGE / 1024 / 1024)
+        prem = database.get_premium_settings()
+        premium_text = texts_mod.TEXTS[lang]["premium_info"].format(
+            reg_zips=reg_zips, reg_storage=reg_storage,
+            reg_files=state.MAX_FILES, reg_pw=state.DEFAULT_PW_ZIPS_DAY,
+            prem_zips=prem["zips_day"], prem_storage=prem["storage_mb"],
+            prem_files=prem["files"], prem_pw=prem["pw_zips_day"],
+        )
         await client.send_message(
             message.chat.id,
-            texts_mod.TEXTS[lang]["premium_info"],
+            premium_text,
             parse_mode=enums.ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([[
                 InlineKeyboardButton("💎 Premium olish | Get Premium", url="https://t.me/Abdurahim0525")
@@ -302,43 +310,67 @@ async def on_text(client, message):
             except Exception:
                 await message.reply("❌ Butun son yuboring")
             return
+
+        if action == "set_premium_settings":
+            parts = raw.split()
+            if len(parts) != 5:
+                await message.reply("❌ Format: `ZIP_KUN XOTIRA_MB FAYL SIQISH PAROL_KUN`\nMisol: `15 2048 60 6 15`")
+                return
+            try:
+                zips_day, storage_mb, files, comp, pw_zips = (int(p) for p in parts)
+                database.set_premium_settings(zips_day, storage_mb, files, comp, pw_zips)
+                await message.reply(
+                    "✅ Premium sozlamalari yangilandi!\n\n"
+                    f"📦 ZIP/kun: *{zips_day}*\n"
+                    f"💾 Xotira: *{storage_mb} MB*\n"
+                    f"📎 Fayl/ZIP: *{files}*\n"
+                    f"🗜 Siqish: *{comp}*\n"
+                    f"🔐 Parol/kun: *{pw_zips}*\n\n"
+                    "_Bu sozlamalar keyingi safar 'Premium yoqish' bosilganda qo'llanadi._",
+                    parse_mode=enums.ParseMode.MARKDOWN,
+                )
+            except Exception:
+                await message.reply("❌ Xato. Format: `ZIP_KUN XOTIRA_MB FAYL SIQISH PAROL_KUN`")
+            return
         if action == "premium_on":
             try:
                 target_id = int(raw)
                 target_lang = database.get_lang(target_id) or "uz"
-                
-                # Premium qiymatlar:
-                database.set_user_zip_limit(target_id, 10)           # kunlik 10 ta ZIP
-                database.set_user_storage_limit(target_id, 1024 * 1024 * 1024)  # 1 GB
-                database.set_user_max_files(target_id, 40)           # 40 ta fayl
-                database.set_user_compression(target_id, 6)          # o‘rta siqish
-                database.set_user_premium(target_id, True)           # parol qo'yish: kuniga 5 marta
-                
+
+                s = database.get_premium_settings()
+                database.apply_premium(target_id)
+
+                comp_text_uz = {0: "Yo'q", 6: "O'rta daraja", 9: "Yuqori daraja"}.get(s["compression"], f"Daraja {s['compression']}")
+                comp_text_en = {0: "None", 6: "Medium", 9: "High"}.get(s["compression"], f"Level {s['compression']}")
+
                 await message.reply(
                     f"✅ Premium yoqildi!\n"
                     f"👤 ID: `{target_id}`\n"
-                    f"📦 ZIP: 10 ta/kun | 💾 1 GB | 📎 40 fayl | 🗜 O‘rta siqish",
+                    f"📦 ZIP: {s['zips_day']} ta/kun | 💾 {s['storage_mb']} MB | "
+                    f"📎 {s['files']} fayl | 🗜 {comp_text_uz} | 🔐 {s['pw_zips_day']} parolli zip/kun",
                     parse_mode=enums.ParseMode.MARKDOWN,
                 )
-                
+
                 # Foydalanuvchiga xabar yuborish (tiliga qarab)
                 try:
                     if target_lang == "en":
                         msg_text = (
                             "🎉 *Congratulations! You are now a Premium user!*\n\n"
-                            "✅ Daily ZIPs: *10*\n"
-                            "✅ Storage: *1 GB*\n"
-                            "✅ Files per ZIP: *40*\n"
-                            "✅ Compression: *Medium*\n\n"
+                            f"✅ Daily ZIPs: *{s['zips_day']}*\n"
+                            f"✅ Storage: *{s['storage_mb']} MB*\n"
+                            f"✅ Files per ZIP: *{s['files']}*\n"
+                            f"✅ Compression: *{comp_text_en}*\n"
+                            f"✅ Password-protected ZIPs: *{s['pw_zips_day']} per day* 🔐\n\n"
                             "🚀 Enjoy unlimited possibilities!"
                         )
                     else:
                         msg_text = (
                             "🎉 *Tabriklaymiz! Siz Premium foydalanuvchi bo‘ldingiz!*\n\n"
-                            "✅ Kunlik ZIP: *10 ta*\n"
-                            "✅ Xotira: *1 GB*\n"
-                            "✅ Fayllar soni: *40 ta*\n"
-                            "✅ Siqish: *O‘rta daraja*\n\n"
+                            f"✅ Kunlik ZIP: *{s['zips_day']} ta*\n"
+                            f"✅ Xotira: *{s['storage_mb']} MB*\n"
+                            f"✅ Fayllar soni: *{s['files']} ta*\n"
+                            f"✅ Siqish: *{comp_text_uz}*\n"
+                            f"✅ Parolli ZIP: *Kuniga {s['pw_zips_day']} ta* 🔐\n\n"
                             "🚀 Endi cheklovlarsiz ishlashingiz mumkin!"
                         )
                     await client.send_message(target_id, msg_text, parse_mode=enums.ParseMode.MARKDOWN)

@@ -326,6 +326,7 @@ async def adm_limits(client, call):
             InlineKeyboardButton("❌ Premium bekor qilish", callback_data="adm_premium_off")],
             [InlineKeyboardButton("🔐 Foydalanuvchi parol limiti", callback_data="adm_set_pw_limit"),
             InlineKeyboardButton("🔐 Hamma uchun parol limiti", callback_data="adm_all_pw_limit")],
+            [InlineKeyboardButton("⭐ Premium sozlamalarini o'zgartirish", callback_data="adm_premium_settings")],
         ]),
     )
     await call.answer()
@@ -406,6 +407,26 @@ async def adm_all_pw_limit(client, call):
     state.waiting_for_user_id[ADMIN_ID] = "set_all_pw_limit"
     await call.message.reply("🔐 *Hamma uchun kunlik parol limiti*\n\nFaqat son yuboring.\nMisol: `1`",
                              parse_mode=enums.ParseMode.MARKDOWN)
+    await call.answer()
+
+@app.on_callback_query(admin_filter & filters.create(lambda _, __, q: q.data == "adm_premium_settings"))
+async def adm_premium_settings(client, call):
+    s = database.get_premium_settings()
+    state.waiting_for_user_id[ADMIN_ID] = "set_premium_settings"
+    await call.message.reply(
+        "⭐ *Premium sozlamalarini qayta belgilash*\n\n"
+        f"Joriy qiymatlar:\n"
+        f"📦 ZIP/kun: *{s['zips_day']}*\n"
+        f"💾 Xotira: *{s['storage_mb']} MB*\n"
+        f"📎 Fayl/ZIP: *{s['files']}*\n"
+        f"🗜 Siqish: *{s['compression']}* (0/6/9)\n"
+        f"🔐 Parol/kun: *{s['pw_zips_day']}*\n\n"
+        "Yangi qiymatlarni shu tartibda, bo'sh joy bilan ajratib yuboring:\n"
+        "`ZIP_KUN XOTIRA_MB FAYL SIQISH PAROL_KUN`\n\n"
+        "Misol: `15 2048 60 6 15`\n\n"
+        "_Eslatma: bu faqat yangi premium yoqilganda qo'llanadi — mavjud premium foydalanuvchilarga ta'sir qilmaydi._",
+        parse_mode=enums.ParseMode.MARKDOWN,
+    )
     await call.answer()
 
 @app.on_callback_query(admin_filter & filters.create(lambda _, __, q: q.data == "adm_reset_limits"))
