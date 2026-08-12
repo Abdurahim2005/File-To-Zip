@@ -8,7 +8,7 @@
 """
 import asyncio
 
-from pyrogram import filters, enums
+from pyrogram import filters, enums, ContinuePropagation
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 import database
@@ -185,13 +185,14 @@ async def request_receipt(client, call):
     flow["ask_msg"] = ask
 
 
-# Chek qabul qilish -- rasm yoki PDF
-@app.on_message((filters.photo | filters.document) & filters.private)
+# Chek qabul qilish -- rasm yoki PDF (media.py dagi umumiy fayl-qabul qiluvchi
+# handlerlardan OLDIN ishlashi shart, shuning uchun group=-1 -- past raqam ustuvor)
+@app.on_message((filters.photo | filters.document) & filters.private, group=-1)
 async def receive_receipt(client, message):
     uid = message.from_user.id
     flow = state.user_payment_flow.get(uid)
     if not flow or not flow.get("awaiting_receipt"):
-        return  # bu handler faqat to'lov jarayonidagi foydalanuvchilar uchun
+        raise ContinuePropagation  # to'lov jarayonida emas -- keyingi handlerlarga o'tkazish
 
     if message.photo:
         file_id = message.photo.file_id
