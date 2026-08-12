@@ -41,6 +41,53 @@ TEXTS = {
         "pw_limit_over": "⚠️ Bugungi parol qo'yish imkoniyatingiz tugadi.\n📦 Oddiy ziplab beraman.",
         "pw_left":      "🔐 Bugun yana *{left}* marta parol qo'yish imkoniyatingiz bor.",
         "zip_pw_locked": "🔐 *Ushbu ZIP parol bilan qulflangan*",
+
+        # To'lov
+        "btn_get_premium":   "💳 30 kunlik Premium olish ({price_uzs:,} so'm / {price_usdt} USDT)",
+        "choose_payment_method": "💳 To'lov usulini tanlang:",
+        "btn_card":   "💳 Karta orqali",
+        "btn_crypto": "🪙 Kripto orqali",
+        "btn_cancel": "❌ Bekor qilish",
+        "no_active_cards":  "⚠️ Hozircha faol karta yo'q. Admin bilan bog'laning.",
+        "no_active_tokens": "⚠️ Hozircha faol kripto token yo'q. Admin bilan bog'laning.",
+        "no_active_networks": "⚠️ Bu token uchun faol tarmoq yo'q. Admin bilan bog'laning.",
+        "choose_card":  "💳 Kartani tanlang:",
+        "choose_token": "🪙 Tokenni tanlang:",
+        "choose_network": "🌐 *{token}* uchun tarmoqni tanlang:",
+        "card_details": (
+            "💳 *To'lov ma'lumotlari*\n\n"
+            "🏦 Bank: *{bank}*\n"
+            "💳 Karta: `{number}`\n"
+            "👤 Egasi: *{owner}*\n\n"
+            "💰 To'lov summasi: *{amount:,} so'm*\n\n"
+            "Toʻlovni amalga oshirgach, pastdagi «✅ Toʻladim» tugmasini bosing."
+        ),
+        "network_details": (
+            "🪙 *{token} ({network})* orqali to'lov\n\n"
+            "📮 Manzil: `{address}`\n\n"
+            "💰 To'lov summasi: *{amount} USDT* ga teng qiymatda\n\n"
+            "⚠️ *Diqqat:* boshqa kripto valyuta yuborsangiz ham, "
+            "yuborilayotgan aktiv qiymati aynan *{amount} USDT* ga teng bo'lishi kerak.\n\n"
+            "Toʻlovni amalga oshirgach, pastdagi «✅ Toʻladim» tugmasini bosing."
+        ),
+        "btn_i_paid": "✅ To'ladim",
+        "upload_receipt": "📎 Chek (rasm yoki PDF) yuboring:",
+        "invalid_receipt": "⚠️ Faqat rasm yoki PDF fayl yuboring.",
+        "payment_submitted": "✅ So'rovingiz qabul qilindi (№{payment_id}).\n\n⏳ Admin tekshirib, tez orada tasdiqlaydi.",
+        "payment_review": (
+            "🆕 *Yangi to'lov so'rovi* №{id}\n\n"
+            "👤 {user} (`{user_id}`)\n"
+            "💳 Usul: {method}\n"
+            "💰 Summa: {amount} {currency}\n"
+            "🕒 {created_at}"
+        ),
+        "btn_approve": "✅ Tasdiqlash",
+        "btn_reject":  "❌ Bekor qilish",
+        "no_pending_payments": "📭 Hozircha kutilayotgan to'lov yo'q.",
+        "payment_approved_admin": "✅ To'lov №{id} tasdiqlandi. Foydalanuvchiga Premium yoqildi.",
+        "payment_rejected_admin": "❌ To'lov №{id} bekor qilindi.",
+        "payment_approved_user": "🎉 To'lovingiz tasdiqlandi! Sizga 30 kunlik *Premium* yoqildi. /start bosing.",
+        "payment_rejected_user": "❌ To'lovingiz (№{payment_id}) tasdiqlanmadi.\n\nSabab noaniq bo'lsa, admin bilan bog'laning.",
         "zip_wait":     "⏳ *Fayllar hali yuklanmoqda...* biroz kuting.",
         "zip_queue":    "⏳ *Navbatda...* ZIP jarayoni band, kuting.",
         "zip_caption":  "📦 *ZIP tayyor!*\n🤖 @Zipla_bot — Hayotni Ziplab o't!",
@@ -159,6 +206,53 @@ TEXTS = {
         "pw_limit_over": "⚠️ You've used today's password limit.\n📦 I'll zip it without a password.",
         "pw_left":      "🔐 You have *{left}* password-protected ZIP(s) left today.",
         "zip_pw_locked": "🔐 *This ZIP is password-protected*",
+
+        # Payment
+        "btn_get_premium":   "💳 Get 30-day Premium ({price_uzs:,} UZS / {price_usdt} USDT)",
+        "choose_payment_method": "💳 Choose payment method:",
+        "btn_card":   "💳 By Card",
+        "btn_crypto": "🪙 By Crypto",
+        "btn_cancel": "❌ Cancel",
+        "no_active_cards":  "⚠️ No active cards right now. Contact the admin.",
+        "no_active_tokens": "⚠️ No active crypto tokens right now. Contact the admin.",
+        "no_active_networks": "⚠️ No active network for this token. Contact the admin.",
+        "choose_card":  "💳 Choose a card:",
+        "choose_token": "🪙 Choose a token:",
+        "choose_network": "🌐 Choose a network for *{token}*:",
+        "card_details": (
+            "💳 *Payment details*\n\n"
+            "🏦 Bank: *{bank}*\n"
+            "💳 Card: `{number}`\n"
+            "👤 Owner: *{owner}*\n\n"
+            "💰 Amount: *{amount:,} UZS*\n\n"
+            "After paying, press «✅ I paid» below."
+        ),
+        "network_details": (
+            "🪙 Payment via *{token} ({network})*\n\n"
+            "📮 Address: `{address}`\n\n"
+            "💰 Amount: value equal to *{amount} USDT*\n\n"
+            "⚠️ *Note:* even if you send a different crypto asset, "
+            "its value must equal exactly *{amount} USDT*.\n\n"
+            "After paying, press «✅ I paid» below."
+        ),
+        "btn_i_paid": "✅ I paid",
+        "upload_receipt": "📎 Send the receipt (photo or PDF):",
+        "invalid_receipt": "⚠️ Please send a photo or PDF file only.",
+        "payment_submitted": "✅ Your request was submitted (#{payment_id}).\n\n⏳ The admin will review it shortly.",
+        "payment_review": (
+            "🆕 *New payment request* #{id}\n\n"
+            "👤 {user} (`{user_id}`)\n"
+            "💳 Method: {method}\n"
+            "💰 Amount: {amount} {currency}\n"
+            "🕒 {created_at}"
+        ),
+        "btn_approve": "✅ Approve",
+        "btn_reject":  "❌ Reject",
+        "no_pending_payments": "📭 No pending payments right now.",
+        "payment_approved_admin": "✅ Payment #{id} approved. Premium activated for the user.",
+        "payment_rejected_admin": "❌ Payment #{id} rejected.",
+        "payment_approved_user": "🎉 Your payment was approved! You now have 30-day *Premium*. Press /start.",
+        "payment_rejected_user": "❌ Your payment (#{payment_id}) was not approved.\n\nIf unclear, contact the admin.",
         "zip_wait":     "⏳ *Files still uploading...* please wait.",
         "zip_queue":    "⏳ *In queue...* ZIP process is busy, please wait.",
         "zip_caption":  "📦 *ZIP is ready!*\n🤖 @Zipla_bot — Zip your life!",

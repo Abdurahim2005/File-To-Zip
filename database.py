@@ -1,4 +1,4 @@
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 
 import libsql_experimental as libsql
 
@@ -102,6 +102,57 @@ def init_db():
         CREATE TABLE IF NOT EXISTS app_settings (
             key   TEXT PRIMARY KEY,
             value INTEGER NOT NULL
+        )
+    """)
+    # To'lov: kartalar, kripto tokenlar/tarmoqlar, kutilayotgan to'lovlar
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS cards (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            bank_name   TEXT NOT NULL,
+            card_number TEXT NOT NULL,
+            owner_name  TEXT NOT NULL,
+            is_active   INTEGER DEFAULT 1,
+            created_at  TEXT
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS crypto_tokens (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            name      TEXT NOT NULL,
+            is_active INTEGER DEFAULT 1
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS crypto_networks (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            token_id     INTEGER NOT NULL,
+            network_name TEXT NOT NULL,
+            address      TEXT NOT NULL,
+            is_active    INTEGER DEFAULT 1
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS pending_payments (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id          INTEGER NOT NULL,
+            method           TEXT NOT NULL,
+            method_detail    TEXT,
+            amount           TEXT,
+            currency         TEXT,
+            receipt_file_id  TEXT,
+            receipt_type     TEXT,
+            status           TEXT DEFAULT 'pending',
+            created_at       TEXT,
+            processed_at     TEXT,
+            processed_by     INTEGER
+        )
+    """)
+    # Premium muddatini kuzatish uchun (boshlangan/tugagan sana)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS premium_users (
+            user_id      INTEGER PRIMARY KEY,
+            started_at   TEXT NOT NULL,
+            expires_at   TEXT NOT NULL
         )
     """)
 
@@ -566,8 +617,9 @@ def set_premium_settings(zips_day: int, storage_mb: int, files: int, compression
     _save_app_setting("prem_compression", compression)
     _save_app_setting("prem_pw_zips_day", pw_zips_day)
 
-def apply_premium(uid: int):
-    """Joriy saqlangan Premium sozlamalarini foydalanuvchiga o'rnatadi."""
+def apply_premium(uid: int, days: int = 30):
+    """Joriy saqlangan Premium sozlamalarini foydalanuvchiga o'rnatadi va
+    30 kunlik amal qilish muddatini premium_users jadvaliga yozadi."""
     s = get_premium_settings()
     set_user_zip_limit(uid, s["zips_day"])
     set_user_storage_limit(uid, s["storage_mb"] * 1024 * 1024)
@@ -575,3 +627,168 @@ def apply_premium(uid: int):
     set_user_compression(uid, s["compression"])
     set_user_pw_zip_limit(uid, s["pw_zips_day"])
     set_user_premium(uid, True)
+
+    now = datetime.now()
+    expires = now + timedelta(days=days)
+    c = get_db()
+    c.execute(
+        "INSERT INTO premium_users(user_id, started_at, expires_at) VALUES(?,?,?) "
+        "ON CONFLICT(user_id) DO UPDATE SET started_at=excluded.started_at, expires_at=excluded.expires_at",
+        (uid, now.strftime("%Y-%m-%d %H:%M:%S"), expires.strftime("%Y-%m-%d %H:%M:%S")),
+    )
+    c.commit(); db_sync()
+
+def remove_premium_record(uid: int):
+    c = get_db()
+    c.execute("DELETE FROM premium_users WHERE user_id=?", (uid,))
+    c.commit(); db_sync()
+
+def list_premium_users() -> list:
+    """Barcha faol premium foydalanuvchilar (uid, boshlangan, tugaydigan)."""
+    return get_db().execute(
+        "SELECT user_id, started_at, expires_at FROM premium_users ORDER BY expires_at"
+    ).fetchall()
+
+def get_expired_premium_users(today: str) -> list:
+    """expires_at sanasi bugun yoki undan oldin bo'lganlar (muddati tugaganlar)."""
+    return get_db().execute(
+        "SELECT user_id FROM premium_users WHERE date(expires_at) <= date(?)", (today,)
+    ).fetchall()
+
+def expire_premium_users():
+    """Har kuni bir marta chaqiriladi: muddati tugagan premium foydalanuvchilarni
+    oddiy holatga qaytaradi va premium_users jadvalidan o'chiradi."""
+    today = datetime.now().strftime("%Y-%m-%d")
+    expired = get_expired_premium_users(today)
+    for (uid,) in expired:
+        reset_user_limits(uid)
+        set_user_premium(uid, False)
+        remove_premium_record(uid)
+    return [row[0] for row in expired]
+
+# ════════════════════════════════════════════════════════════
+#  TO'LOV: KARTALAR
+# ════════════════════════════════════════════════════════════
+def add_card(bank_name: str, card_number: str, owner_name: str):
+    c = get_db()
+    c.execute(
+        "INSERT INTO cards(bank_name, card_number, owner_name, is_active, created_at) VALUES(?,?,?,1,?)",
+        (bank_name, card_number, owner_name, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+    )
+    c.commit(); db_sync()
+
+def list_active_cards() -> list:
+    return get_db().execute(
+        "SELECT id, bank_name, card_number, owner_name FROM cards WHERE is_active=1 ORDER BY id"
+    ).fetchall()
+
+def list_all_cards() -> list:
+    return get_db().execute(
+        "SELECT id, bank_name, card_number, owner_name, is_active FROM cards ORDER BY id"
+    ).fetchall()
+
+def get_card(card_id: int):
+    return get_db().execute(
+        "SELECT id, bank_name, card_number, owner_name FROM cards WHERE id=?", (card_id,)
+    ).fetchone()
+
+def delete_card(card_id: int):
+    c = get_db()
+    c.execute("DELETE FROM cards WHERE id=?", (card_id,))
+    c.commit(); db_sync()
+
+# ════════════════════════════════════════════════════════════
+#  TO'LOV: KRIPTO TOKEN VA TARMOQLAR
+# ════════════════════════════════════════════════════════════
+def add_crypto_token(name: str):
+    c = get_db()
+    c.execute("INSERT INTO crypto_tokens(name, is_active) VALUES(?,1)", (name.upper(),))
+    c.commit(); db_sync()
+
+def list_active_tokens() -> list:
+    return get_db().execute("SELECT id, name FROM crypto_tokens WHERE is_active=1 ORDER BY id").fetchall()
+
+def list_all_tokens() -> list:
+    return get_db().execute("SELECT id, name, is_active FROM crypto_tokens ORDER BY id").fetchall()
+
+def get_token(token_id: int):
+    return get_db().execute("SELECT id, name FROM crypto_tokens WHERE id=?", (token_id,)).fetchone()
+
+def delete_token(token_id: int):
+    c = get_db()
+    c.execute("DELETE FROM crypto_networks WHERE token_id=?", (token_id,))
+    c.execute("DELETE FROM crypto_tokens WHERE id=?", (token_id,))
+    c.commit(); db_sync()
+
+def add_network(token_id: int, network_name: str, address: str):
+    c = get_db()
+    c.execute(
+        "INSERT INTO crypto_networks(token_id, network_name, address, is_active) VALUES(?,?,?,1)",
+        (token_id, network_name, address),
+    )
+    c.commit(); db_sync()
+
+def list_networks_for_token(token_id: int) -> list:
+    return get_db().execute(
+        "SELECT id, token_id, network_name, address FROM crypto_networks WHERE token_id=? AND is_active=1 ORDER BY id",
+        (token_id,),
+    ).fetchall()
+
+def list_all_networks_for_token(token_id: int) -> list:
+    return get_db().execute(
+        "SELECT id, token_id, network_name, address, is_active FROM crypto_networks WHERE token_id=? ORDER BY id",
+        (token_id,),
+    ).fetchall()
+
+def get_network(network_id: int):
+    return get_db().execute(
+        "SELECT id, token_id, network_name, address FROM crypto_networks WHERE id=?", (network_id,)
+    ).fetchone()
+
+def delete_network(network_id: int):
+    c = get_db()
+    c.execute("DELETE FROM crypto_networks WHERE id=?", (network_id,))
+    c.commit(); db_sync()
+
+# ════════════════════════════════════════════════════════════
+#  TO'LOV: KUTILAYOTGAN TO'LOVLAR (pending_payments)
+# ════════════════════════════════════════════════════════════
+_PAYMENT_COLS = "id, user_id, method, method_detail, amount, currency, receipt_file_id, receipt_type, status, created_at, processed_at, processed_by"
+
+def create_pending_payment(user_id: int, method: str, method_detail: str, amount: str, currency: str,
+                            receipt_file_id: str, receipt_type: str) -> int:
+    c = get_db()
+    c.execute(
+        "INSERT INTO pending_payments(user_id, method, method_detail, amount, currency, receipt_file_id, receipt_type, status, created_at) "
+        "VALUES(?,?,?,?,?,?,?,'pending',?)",
+        (user_id, method, method_detail, amount, currency, receipt_file_id, receipt_type, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+    )
+    payment_id = c.execute("SELECT last_insert_rowid()").fetchone()[0]
+    c.commit(); db_sync()
+    return payment_id
+
+def get_payment(payment_id: int):
+    return get_db().execute(f"SELECT {_PAYMENT_COLS} FROM pending_payments WHERE id=?", (payment_id,)).fetchone()
+
+def list_pending_payments(limit: int = 20) -> list:
+    return get_db().execute(
+        f"SELECT {_PAYMENT_COLS} FROM pending_payments WHERE status='pending' ORDER BY created_at LIMIT ?", (limit,)
+    ).fetchall()
+
+def count_pending_payments() -> int:
+    return get_db().execute("SELECT COUNT(*) FROM pending_payments WHERE status='pending'").fetchone()[0]
+
+def resolve_payment(payment_id: int, approve: bool, admin_id: int):
+    """To'lovni tasdiqlaydi yoki rad etadi. Muvaffaqiyatli bo'lsa payment tuple qaytaradi, aks holda None."""
+    c = get_db()
+    row = c.execute(f"SELECT {_PAYMENT_COLS} FROM pending_payments WHERE id=?", (payment_id,)).fetchone()
+    if not row or row[8] != "pending":
+        return None
+    new_status = "approved" if approve else "rejected"
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    c.execute(
+        "UPDATE pending_payments SET status=?, processed_at=?, processed_by=? WHERE id=?",
+        (new_status, now, admin_id, payment_id),
+    )
+    c.commit(); db_sync()
+    return row

@@ -24,3 +24,7 @@ PREMIUM_PW_ZIPS_DAY   = 5           # premium: kuniga 5 marta parolli zip
 
 AUTO_ZIP_DELAY = 40
 DEBOUNCE_SEC  = 1.5
+
+# Premium to'lov narxi (30 kunlik)
+PREMIUM_PRICE_UZS  = 25000
+PREMIUM_PRICE_USDT = 2

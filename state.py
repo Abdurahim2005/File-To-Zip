@@ -46,6 +46,8 @@ user_donating:       dict = {}
 admin_reply_to:      dict = {}
 user_zip_naming:     dict = {}
 user_pw_asking:      dict = {}   # uid -> {"chat_id","zip_name"} -- parol kiritilishi kutilmoqda
+user_payment_flow:   dict = {}   # uid -> {"method","method_detail","amount","currency"} -- to'lov jarayoni
+user_admin_flow:     dict = {}   # admin_id -> {"step":..., ...} -- karta/token qo'shish jarayoni
 _user_file_locks:    dict = {}
 
 user_batch_timer:   dict = {}   # uid -> asyncio.Task (1.5 sekundlik taymer)
