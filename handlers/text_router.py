@@ -9,7 +9,7 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 import database
 import state
 import texts as texts_mod
-from config import ADMIN_ID, ADMIN_USERNAME, BASE_DIR
+from config import ADMIN_ID, ADMIN_USERNAME, BASE_DIR, PREMIUM_PRICE_UZS, PREMIUM_PRICE_USDT
 from bot_instance import app
 from texts import tx
 from fs_utils import file_count, disk_used, fmt_size, sanitize_zip_name, make_zip_name
@@ -49,6 +49,13 @@ async def on_text(client, message):
     lang = database.get_lang(uid) or "uz"
     t    = texts_mod.TEXTS.get(lang, texts_mod.TEXTS["uz"])
 
+    # ── Admin: karta/token/tarmoq qo'shish oqimi (to'lovlar) ──
+    if uid == ADMIN_ID and uid in state.user_admin_flow:
+        from handlers.payment import handle_admin_payment_flow
+        handled = await handle_admin_payment_flow(message)
+        if handled:
+            return
+
         # ── Keyboard button: Premium ──
     if text == "⭐ Premium":
         await safe_delete(message)
@@ -66,7 +73,10 @@ async def on_text(client, message):
             premium_text,
             parse_mode=enums.ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("💎 Premium olish | Get Premium", url="https://t.me/Abdurahim0525")
+                InlineKeyboardButton(
+                    tx(uid, "btn_get_premium", price_uzs=PREMIUM_PRICE_UZS, price_usdt=PREMIUM_PRICE_USDT),
+                    callback_data="topup:start",
+                )
             ]]),
             disable_web_page_preview=True,
         )
@@ -218,6 +228,7 @@ async def on_text(client, message):
                 target_id = int(re.search(r"\d+", raw).group()) # type: ignore
                 database.reset_user_limits(target_id)
                 database.set_user_premium(target_id, False)
+                database.remove_premium_record(target_id)
                 await message.reply(f"✅ `{target_id}` limiti standartga qaytarildi.",
                                     parse_mode=enums.ParseMode.MARKDOWN)
             except Exception:
@@ -387,6 +398,7 @@ async def on_text(client, message):
                 
                 database.reset_user_limits(target_id)
                 database.set_user_premium(target_id, False)
+                database.remove_premium_record(target_id)
                 
                 await message.reply(
                     f"✅ Premium bekor qilindi!\n"

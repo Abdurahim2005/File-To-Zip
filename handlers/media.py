@@ -14,12 +14,17 @@ from receiving import receive_file
 @app.on_message(filters.document & ~filters.video & ~filters.audio & ~filters.voice &
                 ~filters.video_note & ~filters.sticker & ~filters.animation & ~filters.photo)
 async def on_document(client, message):
+    uid = message.from_user.id
+    if state.user_payment_flow.get(uid, {}).get("awaiting_receipt"):
+        return  # payment.py o'z handlerida chekni qabul qiladi
     doc = message.document
     await receive_file(client, message, doc, doc.file_name or f"file_{datetime.now():%Y%m%d_%H%M%S}")
 @app.on_message(filters.photo)
 async def on_photo(client, message):
     # Skip if user is trying to contact admin or admin is replying
     uid = message.from_user.id
+    if state.user_payment_flow.get(uid, {}).get("awaiting_receipt"):
+        return  # payment.py o'z handlerida chekni qabul qiladi
     if uid == ADMIN_ID and ADMIN_ID in state.admin_reply_to:
         await _handle_admin_reply_media(client, message)
         return

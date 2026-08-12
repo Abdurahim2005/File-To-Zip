@@ -44,6 +44,7 @@ async def cmd_admin(client, message):
              InlineKeyboardButton("💰 Donatlar",           callback_data="adm_donations")],
             [InlineKeyboardButton("⚙️ Limit boshqarish",  callback_data="adm_limits"),
              InlineKeyboardButton("🔁 DB tekshirish",      callback_data="adm_volume")],
+            [InlineKeyboardButton("💳 To'lovlar",          callback_data="adm_payments_menu")],
         ]),
     )
 
@@ -327,6 +328,7 @@ async def adm_limits(client, call):
             [InlineKeyboardButton("🔐 Foydalanuvchi parol limiti", callback_data="adm_set_pw_limit"),
             InlineKeyboardButton("🔐 Hamma uchun parol limiti", callback_data="adm_all_pw_limit")],
             [InlineKeyboardButton("⭐ Premium sozlamalarini o'zgartirish", callback_data="adm_premium_settings")],
+            [InlineKeyboardButton("📋 Premium foydalanuvchilar ro'yxati", callback_data="adm_premium_list")],
         ]),
     )
     await call.answer()
@@ -428,6 +430,23 @@ async def adm_premium_settings(client, call):
         parse_mode=enums.ParseMode.MARKDOWN,
     )
     await call.answer()
+
+@app.on_callback_query(admin_filter & filters.create(lambda _, __, q: q.data == "adm_premium_list"))
+async def adm_premium_list(client, call):
+    users = database.list_premium_users()
+    await call.answer()
+    if not users:
+        await call.message.reply("📋 Hozircha premium foydalanuvchi yo'q.")
+        return
+
+    lines = ["📋 *Premium foydalanuvchilar ro'yxati*\n"]
+    for uid, started_at, expires_at in users:
+        lines.append(f"👤 `{uid}`\n   🟢 Boshlangan: {started_at}\n   🔴 Tugaydi: {expires_at}")
+    text = "\n\n".join(lines)
+
+    # Telegram xabar uzunligi cheklovi -- bo'lib yuborish
+    for i in range(0, len(text), 3500):
+        await call.message.reply(text[i:i+3500], parse_mode=enums.ParseMode.MARKDOWN)
 
 @app.on_callback_query(admin_filter & filters.create(lambda _, __, q: q.data == "adm_reset_limits"))
 async def adm_reset_limits(client, call):
