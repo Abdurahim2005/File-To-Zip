@@ -21,6 +21,10 @@ PREMIUM_FILES         = 40
 PREMIUM_COMPRESSION   = 6
 PREMIUM_PW_ZIPS_DAY   = 10
 
+# Fikr-mulohaza (feedback) sozlamalari -- admin panel orqali o'zgartiriladi
+FEEDBACK_CHANNEL_ID   = None    # None = ulanmagan
+FEEDBACK_COOLDOWN_HOURS = 24    # kuniga necha soatda 1 marta yozish mumkin
+
 MAX_FILES     = 20
 
 # ════════════════════════════════════════════════════════════
@@ -48,6 +52,7 @@ user_zip_naming:     dict = {}
 user_pw_asking:      dict = {}   # uid -> {"chat_id","zip_name"} -- parol kiritilishi kutilmoqda
 user_payment_flow:   dict = {}   # uid -> {"method","method_detail","amount","currency"} -- to'lov jarayoni
 user_admin_flow:     dict = {}   # admin_id -> {"step":..., ...} -- karta/token qo'shish jarayoni
+user_feedback_flow:  dict = {}   # uid -> True -- fikr-mulohaza matnini kutish holati
 _user_file_locks:    dict = {}
 
 user_batch_timer:   dict = {}   # uid -> asyncio.Task (1.5 sekundlik taymer)

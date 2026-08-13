@@ -155,6 +155,41 @@ def init_db():
             expires_at   TEXT NOT NULL
         )
     """)
+    # Fikr-mulohaza (feedback) uchun
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS feedback_posts (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            author_id           INTEGER NOT NULL,
+            channel_message_id  INTEGER NOT NULL,
+            upvotes             INTEGER DEFAULT 0,
+            downvotes           INTEGER DEFAULT 0,
+            created_at          TEXT
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS feedback_votes (
+            post_id   INTEGER NOT NULL,
+            voter_id  INTEGER NOT NULL,
+            is_up     INTEGER NOT NULL,
+            PRIMARY KEY (post_id, voter_id)
+        )
+    """)
+    # Feedback kanal ID matn (masalan @username yoki -100...) bo'lishi mumkin,
+    # shuning uchun app_settings (faqat INTEGER) o'rniga alohida jadval
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS app_text_settings (
+            key   TEXT PRIMARY KEY,
+            value TEXT
+        )
+    """)
+    try:
+        c.execute("ALTER TABLE user_limits ADD COLUMN last_feedback_at TEXT DEFAULT NULL")
+    except Exception:
+        pass
+    try:
+        c.execute("ALTER TABLE user_limits ADD COLUMN feedback_banned INTEGER DEFAULT 0")
+    except Exception:
+        pass
 
     # Mavjud jadvallarda eski ustunlarni qo'shish
     for col, dfn in [("waiting_zip","INTEGER DEFAULT 0"), ("is_banned","INTEGER DEFAULT 0")]:
@@ -234,10 +269,29 @@ def _load_app_settings():
     if "prem_pw_zips_day" in values:
         state.PREMIUM_PW_ZIPS_DAY = values["prem_pw_zips_day"]
 
+    text_rows = get_db().execute("SELECT key, value FROM app_text_settings").fetchall()
+    text_values = {k: v for k, v in text_rows}
+    if "feedback_channel_id" in text_values:
+        state.FEEDBACK_CHANNEL_ID = text_values["feedback_channel_id"] or None
+    if "feedback_cooldown_hours" in text_values and text_values["feedback_cooldown_hours"]:
+        try:
+            state.FEEDBACK_COOLDOWN_HOURS = int(text_values["feedback_cooldown_hours"])
+        except ValueError:
+            pass
+
 def _save_app_setting(key: str, value: int):
     c = get_db()
     c.execute(
         "INSERT INTO app_settings(key,value) VALUES(?,?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (key, value),
+    )
+    c.commit(); db_sync()
+
+def _save_text_setting(key: str, value):
+    c = get_db()
+    c.execute(
+        "INSERT INTO app_text_settings(key,value) VALUES(?,?) "
         "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
         (key, value),
     )
@@ -792,3 +846,134 @@ def resolve_payment(payment_id: int, approve: bool, admin_id: int):
     )
     c.commit(); db_sync()
     return row
+
+# ════════════════════════════════════════════════════════════
+#  FIKR-MULOHAZA (FEEDBACK)
+# ════════════════════════════════════════════════════════════
+def get_feedback_channel_id():
+    return state.FEEDBACK_CHANNEL_ID
+
+def normalize_feedback_channel(raw):
+    """Kanal ID stringini pyrogram uchun mos qiymatga o'giradi:
+    raqamli bo'lsa int, aks holda @username satri sifatida qoldiradi."""
+    if not raw:
+        return None
+    raw = raw.strip()
+    if not raw:
+        return None
+    if raw.lstrip("-").isdigit():
+        return int(raw)
+    return raw
+
+def set_feedback_channel_id(channel_id: str | None):
+    state.FEEDBACK_CHANNEL_ID = channel_id
+    _save_text_setting("feedback_channel_id", channel_id or "")
+
+def get_feedback_cooldown_hours() -> int:
+    return state.FEEDBACK_COOLDOWN_HOURS
+
+def set_feedback_cooldown_hours(hours: int):
+    state.FEEDBACK_COOLDOWN_HOURS = hours
+    _save_text_setting("feedback_cooldown_hours", str(hours))
+
+def _ensure_user_limits_row(uid: int):
+    c = get_db()
+    existing = c.execute("SELECT telegram_id FROM user_limits WHERE telegram_id=?", (uid,)).fetchone()
+    if not existing:
+        c.execute(
+            "INSERT INTO user_limits(telegram_id,max_zips_day,max_storage_bytes,compression_level) VALUES(?,?,?,?)",
+            (uid, state.DEFAULT_ZIPS_DAY, state.DEFAULT_STORAGE, state.DEFAULT_COMPRESSION),
+        )
+        c.commit(); db_sync()
+
+def is_feedback_banned(uid: int) -> bool:
+    r = get_db().execute("SELECT feedback_banned FROM user_limits WHERE telegram_id=?", (uid,)).fetchone()
+    return bool(r and r[0])
+
+def set_feedback_banned(uid: int, banned: bool):
+    _ensure_user_limits_row(uid)
+    c = get_db()
+    c.execute("UPDATE user_limits SET feedback_banned=? WHERE telegram_id=?", (1 if banned else 0, uid))
+    c.commit(); db_sync()
+
+def check_feedback_slot(uid: int) -> tuple[bool, datetime | None]:
+    """(ruxsat_bormi, keyingi_ruxsat_vaqti). Limitni ishlatmaydi -- faqat tekshiradi."""
+    r = get_db().execute("SELECT last_feedback_at FROM user_limits WHERE telegram_id=?", (uid,)).fetchone()
+    if not r or not r[0]:
+        return True, None
+    try:
+        last = datetime.strptime(r[0], "%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return True, None
+    next_allowed = last + timedelta(hours=state.FEEDBACK_COOLDOWN_HOURS)
+    now = datetime.now()
+    if now >= next_allowed:
+        return True, None
+    return False, next_allowed
+
+def mark_feedback_sent(uid: int):
+    _ensure_user_limits_row(uid)
+    c = get_db()
+    c.execute("UPDATE user_limits SET last_feedback_at=? WHERE telegram_id=?",
+              (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), uid))
+    c.commit(); db_sync()
+
+def reset_feedback_limit(uid: int):
+    c = get_db()
+    c.execute("UPDATE user_limits SET last_feedback_at=NULL WHERE telegram_id=?", (uid,))
+    c.commit(); db_sync()
+
+def create_feedback_post(author_id: int, channel_message_id: int) -> int:
+    c = get_db()
+    c.execute(
+        "INSERT INTO feedback_posts(author_id, channel_message_id, upvotes, downvotes, created_at) VALUES(?,?,0,0,?)",
+        (author_id, channel_message_id, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+    )
+    post_id = c.execute("SELECT last_insert_rowid()").fetchone()[0]
+    c.commit(); db_sync()
+    return post_id
+
+def get_feedback_post(post_id: int):
+    return get_db().execute(
+        "SELECT id, author_id, channel_message_id, upvotes, downvotes FROM feedback_posts WHERE id=?", (post_id,)
+    ).fetchone()
+
+def apply_feedback_vote(post_id: int, voter_id: int, is_up: bool):
+    """Ovoz beradi/o'zgartiradi/olib tashlaydi (toggle). Yangilangan
+    (id, author_id, channel_message_id, upvotes, downvotes) qaytaradi, topilmasa None."""
+    c = get_db()
+    row = c.execute(
+        "SELECT id, author_id, channel_message_id, upvotes, downvotes FROM feedback_posts WHERE id=?", (post_id,)
+    ).fetchone()
+    if not row:
+        return None
+    _id, author_id, channel_message_id, upvotes, downvotes = row
+
+    existing = c.execute(
+        "SELECT is_up FROM feedback_votes WHERE post_id=? AND voter_id=?", (post_id, voter_id)
+    ).fetchone()
+
+    if existing is None:
+        c.execute("INSERT INTO feedback_votes(post_id, voter_id, is_up) VALUES(?,?,?)", (post_id, voter_id, int(is_up)))
+        if is_up:
+            upvotes += 1
+        else:
+            downvotes += 1
+    elif bool(existing[0]) == is_up:
+        c.execute("DELETE FROM feedback_votes WHERE post_id=? AND voter_id=?", (post_id, voter_id))
+        if is_up:
+            upvotes = max(0, upvotes - 1)
+        else:
+            downvotes = max(0, downvotes - 1)
+    else:
+        c.execute("UPDATE feedback_votes SET is_up=? WHERE post_id=? AND voter_id=?", (int(is_up), post_id, voter_id))
+        if is_up:
+            upvotes += 1
+            downvotes = max(0, downvotes - 1)
+        else:
+            downvotes += 1
+            upvotes = max(0, upvotes - 1)
+
+    c.execute("UPDATE feedback_posts SET upvotes=?, downvotes=? WHERE id=?", (upvotes, downvotes, post_id))
+    c.commit(); db_sync()
+    return (_id, author_id, channel_message_id, upvotes, downvotes)

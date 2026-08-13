@@ -118,6 +118,18 @@ TEXTS = {
         "btn_donate":       "💰 Donat",
         "btn_stats":        "📊 Statistika",
         "btn_contact":      "📞 Admin bilan bog'lanish",
+        "btn_feedback":     "💬 Fikr-mulohaza",
+        "feedback_ask": "💬 Fikringiz, taklifingiz yoki muammoingizni yozing (link/reklama yubormang):",
+        "feedback_link_blocked": "⚠️ Xabaringizda link yoki @username bor. Iltimos, ularsiz qaytadan yozing:",
+        "feedback_thanks": "✅ Rahmat! Fikringiz kanalga joylandi.",
+        "feedback_failed": "⚠️ Hozircha yubora olmadik. Birozdan so'ng qayta urinib ko'ring.",
+        "feedback_banned": "🚫 Sizga fikr-mulohaza yozish cheklangan.",
+        "feedback_rate_limited": "⏳ Kuniga faqat 1 marta yozish mumkin.\nKeyingi safar: *{when}*",
+        "feedback_channel_post": (
+            "💬 *Yangi fikr-mulohaza*\n\n"
+            "👤 Kimdan: {sender}\n\n"
+            "{text}"
+        ),
         # Public stats
         "pub_stats": (
             "📊 *Bot statistikasi*\n\n"
@@ -272,6 +284,18 @@ TEXTS = {
         "btn_donate":       "💰 Donate",
         "btn_stats":        "📊 Statistics",
         "btn_contact":      "📞 Contact admin",
+        "btn_feedback":     "💬 Feedback",
+        "feedback_ask": "💬 Write your feedback, suggestion, or issue (no links/ads):",
+        "feedback_link_blocked": "⚠️ Your message contains a link or @username. Please rewrite without them:",
+        "feedback_thanks": "✅ Thanks! Your feedback was posted to the channel.",
+        "feedback_failed": "⚠️ Couldn't send it right now. Please try again shortly.",
+        "feedback_banned": "🚫 You're restricted from sending feedback.",
+        "feedback_rate_limited": "⏳ Only 1 message per day is allowed.\nNext time: *{when}*",
+        "feedback_channel_post": (
+            "💬 *New feedback*\n\n"
+            "👤 From: {sender}\n\n"
+            "{text}"
+        ),
         "pub_stats": (
             "📊 *Bot statistics*\n\n"
             "👥 Total users: *{users}*\n"

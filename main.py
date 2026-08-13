@@ -13,7 +13,7 @@ from fs_utils import fmt_size, total_disk_all
 
 # Importing these registers every handler on `app` as a side effect of
 # their @app.on_message / @app.on_callback_query decorators.
-from handlers import media, user_commands, text_router, admin, payment  # noqa: F401
+from handlers import media, user_commands, text_router, admin, payment, feedback  # noqa: F401
 
 # ════════════════════════════════════════════════════════════
 #  FLASK — keep-alive

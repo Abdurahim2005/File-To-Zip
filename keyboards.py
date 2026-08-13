@@ -9,6 +9,6 @@ def main_keyboard(uid: int):
     t = TEXTS.get(lang, TEXTS["uz"])
     return ReplyKeyboardMarkup(
         [[KeyboardButton("⭐ Premium"), KeyboardButton(t["btn_stats"])],
-         [KeyboardButton(t["btn_contact"])]],
+         [KeyboardButton(t["btn_contact"]), KeyboardButton(t["btn_feedback"])]],
         resize_keyboard=True
     )
