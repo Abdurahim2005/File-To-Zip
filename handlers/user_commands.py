@@ -21,6 +21,11 @@ async def cmd_start(client, message):
     uid = message.from_user.id
     await safe_delete(message)
 
+    # Feedback yozish jarayonida edi -- /start bosilgani "bekor qilish" hisoblanadi
+    fb_info = state.user_feedback_flow.pop(uid, None)
+    if fb_info:
+        await safe_delete(fb_info.get("ask_msg"))
+
     if database.is_banned(uid):
         return
 

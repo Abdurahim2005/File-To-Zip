@@ -50,11 +50,20 @@ async def on_text(client, message):
     t    = texts_mod.TEXTS.get(lang, texts_mod.TEXTS["uz"])
 
     # ── Fikr-mulohaza: matn kiritilishi kutilmoqda ──
+    # (agar foydalanuvchi shu payt boshqa menyu tugmasini bossa, feedback
+    # holati bekor qilinadi va o'sha tugmaning o'z ishi bajariladi --
+    # aks holda tugma nomi ham "feedback matni" sifatida yuborilib qolar edi)
+    _menu_buttons = {"⭐ Premium", t.get("btn_stats"), t.get("btn_contact"), t.get("btn_feedback")}
     if uid in state.user_feedback_flow:
-        from handlers.feedback import handle_feedback_text
-        handled = await handle_feedback_text(client, message)
-        if handled:
-            return
+        if text in _menu_buttons or text.startswith("/"):
+            info = state.user_feedback_flow.pop(uid, None)
+            if info:
+                await safe_delete(info.get("ask_msg"))
+        else:
+            from handlers.feedback import handle_feedback_text
+            handled = await handle_feedback_text(client, message)
+            if handled:
+                return
 
     # ── Keyboard button: Fikr-mulohaza ──
     if text == t.get("btn_feedback"):

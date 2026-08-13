@@ -76,8 +76,19 @@ async def start_feedback(client, message):
                                  parse_mode=enums.ParseMode.MARKDOWN)
             return
 
-    ask = await message.reply(tx(uid, "feedback_ask"))
+    ask = await message.reply(
+        tx(uid, "feedback_ask"),
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(tx(uid, "btn_cancel"), callback_data="fb_cancel")]]),
+    )
     state.user_feedback_flow[uid] = {"chat_id": message.chat.id, "ask_msg": ask}
+
+
+@app.on_callback_query(filters.create(lambda _, __, q: q.data == "fb_cancel"))
+async def cancel_feedback(client, call):
+    uid = call.from_user.id
+    state.user_feedback_flow.pop(uid, None)
+    await call.answer()
+    await safe_delete(call.message)
 
 
 # ════════════════════════════════════════════════════════════
