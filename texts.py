@@ -127,7 +127,8 @@ TEXTS = {
         "feedback_rate_limited": "⏳ Kuniga faqat 1 marta yozish mumkin.\nKeyingi safar: *{when}*",
         "feedback_channel_post": (
             "💬 *Yangi fikr-mulohaza*\n\n"
-            "👤 Kimdan: {sender}\n\n"
+            "👤 Kimdan: {sender}\n"
+            "🆔 ID: `{user_id}`\n\n"
             "{text}"
         ),
         # Public stats
@@ -293,7 +294,8 @@ TEXTS = {
         "feedback_rate_limited": "⏳ Only 1 message per day is allowed.\nNext time: *{when}*",
         "feedback_channel_post": (
             "💬 *New feedback*\n\n"
-            "👤 From: {sender}\n\n"
+            "👤 From: {sender}\n"
+            "🆔 ID: `{user_id}`\n\n"
             "{text}"
         ),
         "pub_stats": (
