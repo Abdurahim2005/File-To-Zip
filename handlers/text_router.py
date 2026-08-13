@@ -49,6 +49,19 @@ async def on_text(client, message):
     lang = database.get_lang(uid) or "uz"
     t    = texts_mod.TEXTS.get(lang, texts_mod.TEXTS["uz"])
 
+    # ── Fikr-mulohaza: matn kiritilishi kutilmoqda ──
+    if uid in state.user_feedback_flow:
+        from handlers.feedback import handle_feedback_text
+        handled = await handle_feedback_text(client, message)
+        if handled:
+            return
+
+    # ── Keyboard button: Fikr-mulohaza ──
+    if text == t.get("btn_feedback"):
+        from handlers.feedback import start_feedback
+        await start_feedback(client, message)
+        return
+
     # ── Admin: karta/token/tarmoq qo'shish oqimi (to'lovlar) ──
     if uid == ADMIN_ID and uid in state.user_admin_flow:
         from handlers.payment import handle_admin_payment_flow
@@ -183,6 +196,12 @@ async def on_text(client, message):
     if uid == ADMIN_ID and uid in state.waiting_for_user_id:
         action = state.waiting_for_user_id.pop(uid)
         raw    = text
+
+        # ── Fikr-mulohaza admin sozlamalari ──
+        from handlers.feedback import handle_admin_feedback_action
+        handled = await handle_admin_feedback_action(client, message, action, raw)
+        if handled:
+            return
 
         if action == "set_zip_limit":
             parts = raw.split()

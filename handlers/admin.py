@@ -45,6 +45,7 @@ async def cmd_admin(client, message):
             [InlineKeyboardButton("⚙️ Limit boshqarish",  callback_data="adm_limits"),
              InlineKeyboardButton("🔁 DB tekshirish",      callback_data="adm_volume")],
             [InlineKeyboardButton("💳 To'lovlar",          callback_data="adm_payments_menu")],
+            [InlineKeyboardButton("💬 Fikr-mulohaza",      callback_data="adm_feedback_menu")],
         ]),
     )
 
