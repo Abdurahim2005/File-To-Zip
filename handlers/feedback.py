@@ -123,7 +123,7 @@ async def handle_feedback_text(client, message) -> bool:
         try:
             channel_text = tx(
                 uid, "feedback_channel_post",
-                sender=_sender_label(message.from_user), text=escape(text),
+                sender=_sender_label(message.from_user), user_id=uid, text=escape(text),
             )
             posted_message = await client.send_message(channel, channel_text, parse_mode=enums.ParseMode.MARKDOWN)
         except Exception:
