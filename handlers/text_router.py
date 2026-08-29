@@ -89,16 +89,14 @@ async def on_text(client, message):
             reg_files=state.MAX_FILES, reg_pw=state.DEFAULT_PW_ZIPS_DAY,
             prem_zips=prem["zips_day"], prem_storage=prem["storage_mb"],
             prem_files=prem["files"], prem_pw=prem["pw_zips_day"],
+            price_uzs=PREMIUM_PRICE_UZS, price_usdt=PREMIUM_PRICE_USDT,
         )
         await client.send_message(
             message.chat.id,
             premium_text,
             parse_mode=enums.ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton(
-                    tx(uid, "btn_get_premium", price_uzs=PREMIUM_PRICE_UZS, price_usdt=PREMIUM_PRICE_USDT),
-                    callback_data="topup:start",
-                )
+                InlineKeyboardButton(tx(uid, "btn_get_premium"), callback_data="topup:start")
             ]]),
             disable_web_page_preview=True,
         )

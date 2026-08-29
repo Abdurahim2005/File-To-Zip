@@ -81,10 +81,6 @@ async def choose_specific_card(client, call):
     await call.message.edit_text(
         tx(uid, "card_details", bank=bank, number=number, owner=owner, amount=PREMIUM_PRICE_UZS),
         parse_mode=enums.ParseMode.MARKDOWN,
-    )
-    await client.send_message(
-        call.message.chat.id,
-        tx(uid, "btn_i_paid"),
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton(tx(uid, "btn_i_paid"), callback_data="i_paid")],
             [InlineKeyboardButton(tx(uid, "btn_cancel"), callback_data="pay_cancel")],
@@ -155,13 +151,10 @@ async def choose_specific_network(client, call):
     })
     state.user_payment_flow[uid] = flow
 
+    text_key = "network_details_usdt" if token_name.strip().upper() == "USDT" else "network_details_other"
     await call.message.edit_text(
-        tx(uid, "network_details", token=token_name, network=net_name, address=address, amount=PREMIUM_PRICE_USDT),
+        tx(uid, text_key, token=token_name, network=net_name, address=address, amount=PREMIUM_PRICE_USDT),
         parse_mode=enums.ParseMode.MARKDOWN,
-    )
-    await client.send_message(
-        call.message.chat.id,
-        tx(uid, "btn_i_paid"),
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton(tx(uid, "btn_i_paid"), callback_data="i_paid")],
             [InlineKeyboardButton(tx(uid, "btn_cancel"), callback_data="pay_cancel")],
@@ -205,6 +198,7 @@ async def receive_receipt(client, message):
         receipt_type = "document"
     else:
         await message.reply(tx(uid, "invalid_receipt"))
+        message.stop_propagation()
         return
 
     await safe_delete(flow.get("ask_msg"))
@@ -223,6 +217,15 @@ async def receive_receipt(client, message):
     await client.send_message(message.chat.id, tx(uid, "payment_submitted", payment_id=payment_id))
 
     await _notify_admin_of_payment(client, payment_id, message.from_user)
+
+    # Chek muvaffaqiyatli qabul qilindi -- xabar bu yerda TO'XTASHI kerak.
+    # group=-1 faqat TARTIBni belgilaydi (bu handler boshqalardan oldin
+    # ishlaydi), lekin funksiya oddiy tugasa pyrogram xabarni baribir
+    # keyingi guruhlarga (masalan media.py dagi umumiy fayl-qabul qiluvchi
+    # handlerlarga) uzatishda davom etadi -- shuning uchun chek fayli
+    # "yangi yuklangan fayl" sifatida ham qabul qilinib, ZIP navbatiga
+    # tushib qolgan edi. stop_propagation() aynan shuni oldini oladi.
+    message.stop_propagation()
 
 
 async def _notify_admin_of_payment(client, payment_id: int, from_user):
