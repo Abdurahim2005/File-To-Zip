@@ -43,7 +43,7 @@ TEXTS = {
         "zip_pw_locked": "🔐 *Ushbu ZIP parol bilan qulflangan*",
 
         # To'lov
-        "btn_get_premium":   "💳 30 kunlik Premium olish ({price_uzs:,} so'm / {price_usdt} USDT)",
+        "btn_get_premium":   "⭐ 30 kunlik Premium olish",
         "choose_payment_method": "💳 To'lov usulini tanlang:",
         "btn_card":   "💳 Karta orqali",
         "btn_crypto": "🪙 Kripto orqali",
@@ -62,12 +62,20 @@ TEXTS = {
             "💰 To'lov summasi: *{amount:,} so'm*\n\n"
             "Toʻlovni amalga oshirgach, pastdagi «✅ Toʻladim» tugmasini bosing."
         ),
-        "network_details": (
+        "network_details_usdt": (
+            "🪙 *{token} ({network})* orqali to'lov\n\n"
+            "📮 Manzil: `{address}`\n\n"
+            "💰 To'lov summasi: *{amount} USDT*\n\n"
+            "⚠️ *Diqqat:* faqat shu manzilga *{token} ({network})* tarmog'ida to'lov yuboring. "
+            "Boshqa token yoki tarmoqda yuborilgan mablag' qaytarilmaydi.\n\n"
+            "Toʻlovni amalga oshirgach, pastdagi «✅ Toʻladim» tugmasini bosing."
+        ),
+        "network_details_other": (
             "🪙 *{token} ({network})* orqali to'lov\n\n"
             "📮 Manzil: `{address}`\n\n"
             "💰 To'lov summasi: *{amount} USDT* ga teng qiymatda\n\n"
-            "⚠️ *Diqqat:* boshqa kripto valyuta yuborsangiz ham, "
-            "yuborilayotgan aktiv qiymati aynan *{amount} USDT* ga teng bo'lishi kerak.\n\n"
+            "⚠️ *Diqqat:* bu manzilga faqat *{token} ({network})* tarmog'ida yuboring. "
+            "Yuborilayotgan aktiv qiymati aynan *{amount} USDT* ga teng bo'lishi kerak.\n\n"
             "Toʻlovni amalga oshirgach, pastdagi «✅ Toʻladim» tugmasini bosing."
         ),
         "btn_i_paid": "✅ To'ladim",
@@ -160,9 +168,7 @@ TEXTS = {
             "• Max 100 ta fayl per ZIP\n• Ustuvor navbat\n\nQiziqasizmi? Adminga yozing!"
         ),
         "premium_info": (
-    "🦯🤩 *Premium – Cheklovlarni unuting!*\n\n"
-    "Oddiy foydalanuvchi bo‘lishdan charchadingizmi? "
-    "Premium bilan bot imkoniyatlari cheksizlikka yaqinlashadi! 🚀\n\n"
+    "⭐ *Premium — Cheklovlarsiz ishlang!*\n\n"
     "━━━━━━━━━━━━━━━━━━━\n"
     "💎 *30 kunlik Premium imkoniyatlari:*\n\n"
     "🗂 *Xotira:* {reg_storage} MB → *{prem_storage} MB*\n"
@@ -171,6 +177,7 @@ TEXTS = {
     "🔐 *Parolli ZIP:* {reg_pw} ta → *{prem_pw} ta* /kun\n"
     "🗜 *Siqish:* Matnli fayllar uchun *O‘rta daraja*\n"
     "   _(❌ Rasm, video, pptx siqilmaydi)_\n\n"
+    "💰 *Narxi:* {price_uzs:,} so'm / {price_usdt} USDT\n\n"
     "👇 Pastdagi tugmani bosing va Premium oling!"
 ),
     },
@@ -213,7 +220,7 @@ TEXTS = {
         "zip_pw_locked": "🔐 *This ZIP is password-protected*",
 
         # Payment
-        "btn_get_premium":   "💳 Get 30-day Premium ({price_uzs:,} UZS / {price_usdt} USDT)",
+        "btn_get_premium":   "⭐ Get 30-day Premium",
         "choose_payment_method": "💳 Choose payment method:",
         "btn_card":   "💳 By Card",
         "btn_crypto": "🪙 By Crypto",
@@ -232,12 +239,20 @@ TEXTS = {
             "💰 Amount: *{amount:,} UZS*\n\n"
             "After paying, press «✅ I paid» below."
         ),
-        "network_details": (
+        "network_details_usdt": (
+            "🪙 Payment via *{token} ({network})*\n\n"
+            "📮 Address: `{address}`\n\n"
+            "💰 Amount: *{amount} USDT*\n\n"
+            "⚠️ *Note:* only send *{token}* on the *{network}* network to this address. "
+            "Funds sent via a different token or network cannot be recovered.\n\n"
+            "After paying, press «✅ I paid» below."
+        ),
+        "network_details_other": (
             "🪙 Payment via *{token} ({network})*\n\n"
             "📮 Address: `{address}`\n\n"
             "💰 Amount: value equal to *{amount} USDT*\n\n"
-            "⚠️ *Note:* even if you send a different crypto asset, "
-            "its value must equal exactly *{amount} USDT*.\n\n"
+            "⚠️ *Note:* only send *{token}* on the *{network}* network to this address. "
+            "The value sent must equal exactly *{amount} USDT*.\n\n"
             "After paying, press «✅ I paid» below."
         ),
         "btn_i_paid": "✅ I paid",
@@ -316,9 +331,7 @@ TEXTS = {
         "zip_name_ask":     "📝 *Enter ZIP name:*\n_(Leave empty for auto name, 30 seconds)_",
         "zip_name_skip":    "⏭ Skip",
         "premium_info": (
-            "🦯🤩 *Premium – Break All Limits!*\n\n"
-            "Tired of being an ordinary user? "
-            "With Premium, your bot capabilities become almost limitless! 🚀\n\n"
+            "⭐ *Premium — Work Without Limits!*\n\n"
             "━━━━━━━━━━━━━━━━━━━\n"
             "💎 *30 Days Premium Benefits:*\n\n"
             "🗂 *Storage:* {reg_storage} MB → *{prem_storage} MB*\n"
@@ -327,6 +340,7 @@ TEXTS = {
             "🔐 *Password ZIPs:* {reg_pw} → *{prem_pw}* /day\n"
             "🗜 *Compression:* Medium for text files\n"
             "   _(❌ Images, video, pptx excluded)_\n\n"
+            "💰 *Price:* {price_uzs:,} UZS / {price_usdt} USDT\n\n"
             "👇 Press the button below and get Premium!"
         ),
     },
