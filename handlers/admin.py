@@ -18,6 +18,10 @@ from zip_ops import create_and_send_zip
 
 @app.on_message(filters.command("admin") & filters.user(ADMIN_ID))
 async def cmd_admin(client, message):
+    await show_admin_panel(client, message)
+
+
+async def show_admin_panel(client, message):
     s    = database.get_global_stats()
     cnt  = database.user_count()
     today = database.today_count()
@@ -46,6 +50,7 @@ async def cmd_admin(client, message):
              InlineKeyboardButton("🔁 DB tekshirish",      callback_data="adm_volume")],
             [InlineKeyboardButton("💳 To'lovlar",          callback_data="adm_payments_menu")],
             [InlineKeyboardButton("💬 Fikr-mulohaza",      callback_data="adm_feedback_menu")],
+            [InlineKeyboardButton("🏆 Top-10 (eng ko'p ZIP)", callback_data="adm_top_users")],
         ]),
     )
 
@@ -94,15 +99,35 @@ async def adm_stats(client, call):
         ).fetchone()
         bar = "█" * min(cnt_d, 15)
         week.append(f"`{d[5:]}` {bar} *{cnt_d}* | *{zr[0]}* zip | *{zr[1]:.1f}* MB")
+    left_total = database.left_users_count()
+    left_today = database.left_users_today_count()
     await call.message.reply(
         f"📊 *Statistika*\n\n👥 *{total}* | 📅 Bugun: *{today_cnt}*\n"
-        f"🇺🇿 *{uz_cnt}* | 🇬🇧 *{en_cnt}* | 🚫 Ban: *{ban_cnt}*\n\n"
+        f"🇺🇿 *{uz_cnt}* | 🇬🇧 *{en_cnt}* | 🚫 Ban: *{ban_cnt}*\n"
+        f"🚪 Chiqib ketgan: *{left_total}* | Bugun: *{left_today}*\n\n"
         f"📦 ZIP: *{s['total_zips']}* | Bugun: *{s['today_zips']}*\n"
         f"📊 MB: *{s['total_mb']:.1f}* | Bugun: *{s['today_mb']:.1f}*\n"
         f"📎 Fayl: *{s['total_files']}*\n\n📈 *7 kun:*\n" + "\n".join(week),
         parse_mode=enums.ParseMode.MARKDOWN,
     )
     await call.answer()
+
+@app.on_callback_query(admin_filter & filters.create(lambda _, __, q: q.data == "adm_top_users"))
+async def adm_top_users(client, call):
+    top = database.get_top_zip_users(limit=10)
+    await call.answer()
+    if not top:
+        await call.message.reply("📭 Hozircha hech kim ZIP yasamagan.")
+        return
+
+    medals = ["🥇", "🥈", "🥉"]
+    lines = ["🏆 *Top-10 — eng ko'p ZIP yasaganlar*\n"]
+    for i, (tid, fn, un, total) in enumerate(top):
+        rank = medals[i] if i < 3 else f"{i+1}."
+        uname = f"@{un}" if un else f"`{tid}`"
+        lines.append(f"{rank} {fn or 'Foydalanuvchi'} ({uname}) — *{total}* ta ZIP")
+
+    await call.message.reply("\n".join(lines), parse_mode=enums.ParseMode.MARKDOWN)
 
 @app.on_callback_query(admin_filter & filters.create(lambda _, __, q: q.data == "adm_broadcast"))
 async def adm_broadcast(client, call):
@@ -113,7 +138,7 @@ async def adm_broadcast(client, call):
 @app.on_callback_query(admin_filter & filters.create(lambda _, __, q: q.data == "adm_search"))
 async def adm_search(client, call):
     state.waiting_for_user_id[ADMIN_ID] = "info"
-    await call.message.reply("🔍 Foydalanuvchi ID sini yuboring:")
+    await call.message.reply("🔍 Foydalanuvchi ID yoki @username yuboring:")
     await call.answer()
 
 @app.on_callback_query(admin_filter & filters.create(lambda _, __, q: q.data == "adm_ban"))

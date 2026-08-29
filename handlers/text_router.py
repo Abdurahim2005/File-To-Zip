@@ -4,6 +4,7 @@ import shutil
 from datetime import datetime
 
 from pyrogram import filters, enums
+from pyrogram.errors import UserIsBlocked, InputUserDeactivated
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 import database
@@ -53,7 +54,7 @@ async def on_text(client, message):
     # (agar foydalanuvchi shu payt boshqa menyu tugmasini bossa, feedback
     # holati bekor qilinadi va o'sha tugmaning o'z ishi bajariladi --
     # aks holda tugma nomi ham "feedback matni" sifatida yuborilib qolar edi)
-    _menu_buttons = {"⭐ Premium", t.get("btn_stats"), t.get("btn_contact"), t.get("btn_feedback")}
+    _menu_buttons = {"⭐ Premium", t.get("btn_stats"), t.get("btn_contact"), t.get("btn_feedback"), "🔐 Admin panel"}
     if uid in state.user_feedback_flow:
         if text in _menu_buttons or text.startswith("/"):
             info = state.user_feedback_flow.pop(uid, None)
@@ -64,6 +65,13 @@ async def on_text(client, message):
             handled = await handle_feedback_text(client, message)
             if handled:
                 return
+
+    # ── Keyboard button: Admin panel (faqat adminga ko'rinadi) ──
+    if text == "🔐 Admin panel" and uid == ADMIN_ID:
+        from handlers.admin import show_admin_panel
+        await safe_delete(message)
+        await show_admin_panel(client, message)
+        return
 
     # ── Keyboard button: Fikr-mulohaza ──
     if text == t.get("btn_feedback"):
@@ -192,6 +200,13 @@ async def on_text(client, message):
             try:
                 await client.send_message(row[0], f"📢 {text}")
                 ok += 1
+            except (UserIsBlocked, InputUserDeactivated):
+                # Foydalanuvchi botni bloklagan/akkaunt o'chirilgan --
+                # broadcast baribir shu foydalanuvchiga urinib ko'rgani
+                # uchun bu ma'lumot "bepul" keladi, alohida so'rov shart
+                # emas -- botning umumiy tezligiga ta'sir qilmaydi.
+                database.mark_user_left(row[0])
+                fail += 1
             except Exception:
                 fail += 1
         await safe_delete(prog)
@@ -513,12 +528,21 @@ async def on_text(client, message):
             return
 
         # Generic user lookup actions (ban, unban, info, clear)
-        try:
-            target_id = int(re.search(r"\d+", raw).group())
-        except Exception:
-            await message.reply("❌ Noto'g'ri ID.")
-            return
-        data = database.get_user_by_id(target_id)
+        raw_stripped = raw.strip()
+        if raw_stripped.startswith("@") or not re.search(r"\d", raw_stripped):
+            # Username orqali qidirish (@username yoki username)
+            data = database.get_user_by_username(raw_stripped)
+            if not data:
+                await message.reply(f"❌ `{raw_stripped}` topilmadi.", parse_mode=enums.ParseMode.MARKDOWN)
+                return
+            target_id = data[0]
+        else:
+            try:
+                target_id = int(re.search(r"\d+", raw_stripped).group())
+            except Exception:
+                await message.reply("❌ Noto'g'ri ID yoki username.")
+                return
+            data = database.get_user_by_id(target_id)
 
         if action == "ban":
             if not data:
@@ -548,13 +572,15 @@ async def on_text(client, message):
             fcnt       = file_count(tid)
             used       = disk_used(tid)
             today_zips = database.get_daily_zip_count(tid)
+            total_zips = database.get_user_zip_total(tid)
             mz, ms     = database.get_user_limits(tid)
             ban_status = "🚫 Ha" if bnnd else "✅ Yoq"
             uname      = f"@{un}" if un else "—"
             await message.reply(
                 f"👤 *Foydalanuvchi*\n\n🆔 `{tid}`\n📛 {fn} {ln}\n🔗 {uname}\n"
                 f"🌍 {lg.upper()} | 📅 {jd[:16]}\n📁 {fcnt} fayl | 💾 {fmt_size(used)}\n"
-                f"📦 ZIP: {today_zips}/{mz} | 💾 Limit: {fmt_size(ms)}\n🚫 Ban: {ban_status}",
+                f"📦 Bugun: {today_zips}/{mz} | 📦 Umumiy ZIP: *{total_zips}* ta\n"
+                f"💾 Limit: {fmt_size(ms)}\n🚫 Ban: {ban_status}",
                 parse_mode=enums.ParseMode.MARKDOWN,
             )
 
