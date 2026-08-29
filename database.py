@@ -192,7 +192,8 @@ def init_db():
         pass
 
     # Mavjud jadvallarda eski ustunlarni qo'shish
-    for col, dfn in [("waiting_zip","INTEGER DEFAULT 0"), ("is_banned","INTEGER DEFAULT 0")]:
+    for col, dfn in [("waiting_zip","INTEGER DEFAULT 0"), ("is_banned","INTEGER DEFAULT 0"),
+                      ("left_at","TEXT DEFAULT NULL")]:
         try: c.execute(f"ALTER TABLE users ADD COLUMN {col} {dfn}")
         except Exception: pass
     for col, dfn in [("username","TEXT DEFAULT ''"), ("invite_link","TEXT DEFAULT ''")]:
@@ -305,7 +306,8 @@ def upsert_user(user, lang=None):
         VALUES(?,?,?,?,?,?)
         ON CONFLICT(telegram_id) DO UPDATE SET
             first_name=excluded.first_name, last_name=excluded.last_name,
-            username=excluded.username, language=COALESCE(?,language)
+            username=excluded.username, language=COALESCE(?,language),
+            left_at=NULL
     """, (
         user.id, user.first_name or "", user.last_name or "",
         user.username or "", lang or "uz",
@@ -329,6 +331,26 @@ def unban_user(uid: int):
     c = get_db(); c.execute("UPDATE users SET is_banned=0 WHERE telegram_id=?", (uid,))
     c.commit(); db_sync()
 
+def mark_user_left(uid: int):
+    """Broadcast paytida UserIsBlocked/InputUserDeactivated xatosi
+    ushlanganda chaqiriladi -- foydalanuvchi botni bloklagan/o'chirilgan
+    deb belgilaydi. Agar foydalanuvchi keyinroq botga qaytsa (masalan
+    blokdan chiqarib, /start bossa), left_at avtomatik tozalanadi --
+    buni upsert_user o'zi qiladi."""
+    c = get_db()
+    c.execute("UPDATE users SET left_at=? WHERE telegram_id=? AND left_at IS NULL",
+              (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), uid))
+    c.commit(); db_sync()
+
+def left_users_count() -> int:
+    return get_db().execute("SELECT COUNT(*) FROM users WHERE left_at IS NOT NULL").fetchone()[0]
+
+def left_users_today_count() -> int:
+    t = datetime.now().strftime("%Y-%m-%d")
+    return get_db().execute(
+        "SELECT COUNT(*) FROM users WHERE left_at LIKE ?", (f"{t}%",)
+    ).fetchone()[0]
+
 def all_users() -> list:
     return get_db().execute(
         "SELECT telegram_id,first_name,last_name,username,language,joined_at,is_banned "
@@ -347,6 +369,35 @@ def get_user_by_id(tid: int):
         "SELECT telegram_id,first_name,last_name,username,language,joined_at,is_banned "
         "FROM users WHERE telegram_id=?", (tid,)
     ).fetchone()
+
+def get_user_by_username(username: str):
+    """@ belgisi va katta/kichik harflarga sezgir emas."""
+    clean = username.lstrip("@").strip().lower()
+    return get_db().execute(
+        "SELECT telegram_id,first_name,last_name,username,language,joined_at,is_banned "
+        "FROM users WHERE lower(username)=?", (clean,)
+    ).fetchone()
+
+def get_user_zip_total(tid: int) -> int:
+    """Foydalanuvchi umumiy nechta ZIP yasaganini (barcha kunlar bo'yicha) qaytaradi."""
+    r = get_db().execute(
+        "SELECT COALESCE(SUM(zip_count),0) FROM zip_stats WHERE telegram_id=?", (tid,)
+    ).fetchone()
+    return r[0] if r else 0
+
+def get_top_zip_users(limit: int = 10) -> list:
+    """Eng ko'p ZIP yasagan foydalanuvchilar (umumiy) -- (telegram_id, first_name, username, total_zips)."""
+    return get_db().execute(
+        """
+        SELECT u.telegram_id, u.first_name, u.username, COALESCE(SUM(z.zip_count),0) AS total
+        FROM zip_stats z
+        JOIN users u ON u.telegram_id = z.telegram_id
+        GROUP BY z.telegram_id
+        ORDER BY total DESC
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
 
 # ── Per-user limits ───────────────────────────────────────
 def get_user_limits(uid: int) -> tuple:
