@@ -114,20 +114,29 @@ async def adm_stats(client, call):
 
 @app.on_callback_query(admin_filter & filters.create(lambda _, __, q: q.data == "adm_top_users"))
 async def adm_top_users(client, call):
-    top = database.get_top_zip_users(limit=10)
     await call.answer()
+    text = build_top_users_text(reveal_username=True)
+    await call.message.reply(text, parse_mode=enums.ParseMode.MARKDOWN)
+
+
+def build_top_users_text(reveal_username: bool) -> str:
+    """Top-10 matnini yasaydi. reveal_username=True bo'lsa (admin panel)
+    @username ko'rinadi, aks holda (oddiy foydalanuvchilar uchun) faqat
+    ism ko'rsatiladi -- boshqalarning shaxsiy ma'lumoti oshkor bo'lmasin."""
+    top = database.get_top_zip_users(limit=10)
     if not top:
-        await call.message.reply("📭 Hozircha hech kim ZIP yasamagan.")
-        return
+        return "📭 Hozircha hech kim ZIP yasamagan."
 
     medals = ["🥇", "🥈", "🥉"]
     lines = ["🏆 *Top-10 — eng ko'p ZIP yasaganlar*\n"]
     for i, (tid, fn, un, total) in enumerate(top):
         rank = medals[i] if i < 3 else f"{i+1}."
-        uname = f"@{un}" if un else f"`{tid}`"
-        lines.append(f"{rank} {fn or 'Foydalanuvchi'} ({uname}) — *{total}* ta ZIP")
-
-    await call.message.reply("\n".join(lines), parse_mode=enums.ParseMode.MARKDOWN)
+        name = fn or "Foydalanuvchi"
+        if reveal_username and un:
+            lines.append(f"{rank} {name} (@{un}) — *{total}* ta ZIP")
+        else:
+            lines.append(f"{rank} {name} — *{total}* ta ZIP")
+    return "\n".join(lines)
 
 @app.on_callback_query(admin_filter & filters.create(lambda _, __, q: q.data == "adm_broadcast"))
 async def adm_broadcast(client, call):

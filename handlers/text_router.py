@@ -54,7 +54,7 @@ async def on_text(client, message):
     # (agar foydalanuvchi shu payt boshqa menyu tugmasini bossa, feedback
     # holati bekor qilinadi va o'sha tugmaning o'z ishi bajariladi --
     # aks holda tugma nomi ham "feedback matni" sifatida yuborilib qolar edi)
-    _menu_buttons = {"⭐ Premium", t.get("btn_stats"), t.get("btn_contact"), t.get("btn_feedback"), "🔐 Admin panel"}
+    _menu_buttons = {"⭐ Premium", t.get("btn_stats"), t.get("btn_contact"), t.get("btn_feedback"), t.get("btn_top"), "🔐 Admin panel"}
     if uid in state.user_feedback_flow:
         if text in _menu_buttons or text.startswith("/"):
             info = state.user_feedback_flow.pop(uid, None)
@@ -77,6 +77,12 @@ async def on_text(client, message):
     if text == t.get("btn_feedback"):
         from handlers.feedback import start_feedback
         await start_feedback(client, message)
+        return
+
+    # ── Keyboard button: Top-10 (hammaga ochiq, username ko'rsatilmaydi) ──
+    if text == t.get("btn_top"):
+        from handlers.admin import build_top_users_text
+        await message.reply(build_top_users_text(reveal_username=False), parse_mode=enums.ParseMode.MARKDOWN)
         return
 
     # ── Admin: karta/token/tarmoq qo'shish oqimi (to'lovlar) ──

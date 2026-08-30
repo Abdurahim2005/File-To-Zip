@@ -10,7 +10,7 @@ import re
 import asyncio
 from html import escape
 
-from pyrogram import filters, enums
+from pyrogram import filters, enums, ContinuePropagation
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 import database
@@ -53,34 +53,64 @@ def _vote_kb(post_id: int, upvotes: int, downvotes: int) -> InlineKeyboardMarkup
 
 
 # ════════════════════════════════════════════════════════════
-#  BOSHLASH
-# ════════════════════════════════════════════════════════════
-# ════════════════════════════════════════════════════════════
 #  BOSHLASH (text_router.py dan chaqiriladi -- "💬 Fikr-mulohaza" tugmasi
 #  bosilganda, umumiy matn-router bilan to'qnashmaslik uchun)
+#  Endi avval "Kanalga" / "Adminga" tanlanadi:
+#   - Kanalga: eski mantiq (link filtri, kunlik limit, faqat matn)
+#   - Adminga: cheklovsiz -- matn, rasm, video, hujjat, silka -- hammasi
+#     to'g'ridan-to'g'ri adminga yuboriladi, chunki bu ommaviy post emas,
+#     shaxsiy xabar.
 # ════════════════════════════════════════════════════════════
 async def start_feedback(client, message):
     uid = message.from_user.id
     lang = database.get_lang(uid) or "uz"
 
-    if not database.get_feedback_channel_id():
-        return  # kanal ulanmagan -- tugma "ishlamaydi" (sokin)
+    has_channel = bool(database.get_feedback_channel_id())
+    if not has_channel and uid == ADMIN_ID:
+        # Kanal ulanmagan bo'lsa ham, admin o'ziga o'zi yozmaydi -- tugma sokin
+        return
 
-    if uid != ADMIN_ID:
-        if database.is_feedback_banned(uid):
-            await message.reply(tx(uid, "feedback_banned"))
-            return
-        allowed, next_allowed = database.check_feedback_slot(uid)
-        if not allowed:
-            await message.reply(tx(uid, "feedback_rate_limited", when=_format_next_allowed(next_allowed)),
-                                 parse_mode=enums.ParseMode.MARKDOWN)
-            return
+    buttons = []
+    if has_channel:
+        buttons.append([InlineKeyboardButton(tx(uid, "fb_target_channel"), callback_data="fb_target:channel")])
+    buttons.append([InlineKeyboardButton(tx(uid, "fb_target_admin"), callback_data="fb_target:admin")])
+    buttons.append([InlineKeyboardButton(tx(uid, "btn_cancel"), callback_data="fb_cancel")])
 
-    ask = await message.reply(
-        tx(uid, "feedback_ask"),
+    ask = await message.reply(tx(uid, "fb_choose_target"), reply_markup=InlineKeyboardMarkup(buttons))
+    state.user_feedback_flow[uid] = {"chat_id": message.chat.id, "ask_msg": ask, "stage": "choose_target"}
+
+
+@app.on_callback_query(filters.create(lambda _, __, q: q.data.startswith("fb_target:")))
+async def choose_feedback_target(client, call):
+    uid = call.from_user.id
+    target = call.data.split(":")[1]  # "channel" yoki "admin"
+    lang = database.get_lang(uid) or "uz"
+
+    if target == "channel":
+        if uid != ADMIN_ID:
+            if database.is_feedback_banned(uid):
+                await call.answer()
+                await call.message.edit_text(tx(uid, "feedback_banned"))
+                return
+            allowed, next_allowed = database.check_feedback_slot(uid)
+            if not allowed:
+                await call.answer()
+                await call.message.edit_text(
+                    tx(uid, "feedback_rate_limited", when=_format_next_allowed(next_allowed)),
+                    parse_mode=enums.ParseMode.MARKDOWN,
+                )
+                return
+
+    await call.answer()
+    ask_text = tx(uid, "feedback_ask") if target == "channel" else tx(uid, "feedback_ask_admin")
+    await call.message.edit_text(
+        ask_text,
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(tx(uid, "btn_cancel"), callback_data="fb_cancel")]]),
     )
-    state.user_feedback_flow[uid] = {"chat_id": message.chat.id, "ask_msg": ask}
+    state.user_feedback_flow[uid] = {
+        "chat_id": call.message.chat.id, "ask_msg": call.message,
+        "stage": "awaiting_content", "target": target,
+    }
 
 
 @app.on_callback_query(filters.create(lambda _, __, q: q.data == "fb_cancel"))
@@ -91,6 +121,20 @@ async def cancel_feedback(client, call):
     await safe_delete(call.message)
 
 
+# Adminga yuborilayotgan xabar matn bo'lmasligi ham mumkin (rasm, video,
+# hujjat, silka -- bularning barchasi ochiq). media.py dagi umumiy
+# fayl-qabul qiluvchi handlerlardan OLDIN ishlashi shart, shuning uchun
+# group=-1 -- xuddi payment.py dagi chek qabul qilish uslubida.
+@app.on_message(filters.private & ~filters.text, group=-1)
+async def receive_feedback_media(client, message):
+    uid = message.from_user.id
+    flow = state.user_feedback_flow.get(uid)
+    if not flow or flow.get("stage") != "awaiting_content" or flow.get("target") != "admin":
+        raise ContinuePropagation  # feedback (admin) jarayonida emas -- keyingi handlerlarga o'tkazish
+
+    await _forward_to_admin(client, message, flow)
+
+
 # ════════════════════════════════════════════════════════════
 #  MATN QABUL QILISH (text_router.py dan chaqiriladi)
 # ════════════════════════════════════════════════════════════
@@ -98,10 +142,45 @@ async def handle_feedback_text(client, message) -> bool:
     """text_router.py ning umumiy matn handleridan chaqiriladi.
     True qaytarsa, xabar feedback sifatida ishlangan hisoblanadi."""
     uid = message.from_user.id
-    if uid not in state.user_feedback_flow:
+    flow = state.user_feedback_flow.get(uid)
+    if not flow or flow.get("stage") != "awaiting_content":
         return False
 
-    lang = database.get_lang(uid) or "uz"
+    if flow.get("target") == "admin":
+        return await _forward_to_admin(client, message, flow)
+    return await _post_to_channel(client, message, flow)
+
+
+async def _forward_to_admin(client, message, flow) -> bool:
+    """Adminga cheklovsiz yuborish -- matn, rasm, video, hujjat, silka,
+    hammasi ochiq. Kunlik limit va link filtri qo'llanmaydi, chunki bu
+    ommaviy post emas, shaxsiy xabar."""
+    uid = message.from_user.id
+    state.user_feedback_flow.pop(uid, None)
+
+    sender = _sender_label(message.from_user)
+    username = f"@{message.from_user.username}" if message.from_user.username else "—"
+    header = f"✉️ *Shaxsiy xabar*\n\n👤 {sender} ({username})\n🆔 `{uid}`\n\n"
+
+    try:
+        if message.text:
+            await client.send_message(ADMIN_ID, header + escape(message.text), parse_mode=enums.ParseMode.MARKDOWN)
+        else:
+            # Media (rasm/video/hujjat/boshqa) bo'lsa -- forward qilib, ustidan
+            # kimdan ekanini yozib qo'yamiz (forward foydalanuvchi ma'lumotini
+            # ko'rsatib qo'yishi mumkin bo'lgani uchun, header alohida yuboriladi)
+            await client.send_message(ADMIN_ID, header, parse_mode=enums.ParseMode.MARKDOWN)
+            await message.forward(ADMIN_ID)
+        await message.reply(tx(uid, "feedback_thanks_admin"))
+    except Exception:
+        await message.reply(tx(uid, "feedback_failed"))
+
+    return True
+
+
+async def _post_to_channel(client, message, flow) -> bool:
+    """Kanalga postlash -- eski mantiq: faqat matn, link filtri, kunlik limit."""
+    uid = message.from_user.id
     text = (message.text or "").strip()
 
     if not text:
