@@ -62,6 +62,9 @@ async def _handle_admin_reply_media(client, message: Message):
         elif message.video:
             await client.send_video(target_uid, message.video.file_id,
                                     caption=caption, parse_mode=enums.ParseMode.MARKDOWN)
+        elif message.document:
+            await client.send_document(target_uid, message.document.file_id,
+                                       caption=caption, parse_mode=enums.ParseMode.MARKDOWN)
         await message.reply(TEXTS["uz"]["admin_reply_sent"])
     except Exception as e:
         await message.reply(f"❌ Yuborishda xato: {e}")
