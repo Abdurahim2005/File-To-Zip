@@ -11,6 +11,7 @@ def main_keyboard(uid: int):
     rows = [
         [KeyboardButton("⭐ Premium"), KeyboardButton(t["btn_stats"])],
         [KeyboardButton(t["btn_contact"]), KeyboardButton(t["btn_feedback"])],
+        [KeyboardButton(t["btn_top"])],
     ]
     if uid == ADMIN_ID:
         rows.append([KeyboardButton("🔐 Admin panel")])
