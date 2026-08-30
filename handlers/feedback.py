@@ -133,6 +133,11 @@ async def receive_feedback_media(client, message):
         raise ContinuePropagation  # feedback (admin) jarayonida emas -- keyingi handlerlarga o'tkazish
 
     await _forward_to_admin(client, message, flow)
+    # Xabar bu yerda TO'XTASHI kerak -- aks holda pyrogram uni keyingi
+    # guruhlarga (media.py dagi umumiy fayl-qabul qiluvchi handlerlarga)
+    # uzatishda davom etadi, va rasm/video xuddi "yangi yuklangan fayl"
+    # sifatida ham qabul qilinib, ZIP navbatiga tushib qolar edi.
+    message.stop_propagation()
 
 
 # ════════════════════════════════════════════════════════════
@@ -162,20 +167,46 @@ async def _forward_to_admin(client, message, flow) -> bool:
     username = f"@{message.from_user.username}" if message.from_user.username else "—"
     header = f"✉️ *Shaxsiy xabar*\n\n👤 {sender} ({username})\n🆔 `{uid}`\n\n"
 
+    reply_kb = InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Javob yozish", callback_data=f"fb_reply:{uid}")]])
+
     try:
         if message.text:
-            await client.send_message(ADMIN_ID, header + escape(message.text), parse_mode=enums.ParseMode.MARKDOWN)
+            await client.send_message(
+                ADMIN_ID, header + escape(message.text),
+                parse_mode=enums.ParseMode.MARKDOWN, reply_markup=reply_kb,
+            )
         else:
-            # Media (rasm/video/hujjat/boshqa) bo'lsa -- forward qilib, ustidan
-            # kimdan ekanini yozib qo'yamiz (forward foydalanuvchi ma'lumotini
-            # ko'rsatib qo'yishi mumkin bo'lgani uchun, header alohida yuboriladi)
-            await client.send_message(ADMIN_ID, header, parse_mode=enums.ParseMode.MARKDOWN)
-            await message.forward(ADMIN_ID)
+            # Media (rasm/video/hujjat/boshqa) bo'lsa -- header'ni caption
+            # sifatida qo'shib, copy() bilan bitta xabarda yuboramiz (forward
+            # o'rniga -- shunda "forwarded from" belgisi chiqmaydi va header
+            # bilan media alohida-alohida kelib qolmaydi).
+            original_caption = escape(message.caption) if message.caption else ""
+            caption = header + original_caption if original_caption else header.rstrip()
+            await message.copy(ADMIN_ID, caption=caption, parse_mode=enums.ParseMode.MARKDOWN, reply_markup=reply_kb)
         await message.reply(tx(uid, "feedback_thanks_admin"))
     except Exception:
         await message.reply(tx(uid, "feedback_failed"))
 
     return True
+
+
+# ════════════════════════════════════════════════════════════
+#  ADMIN: "↩️ Javob yozish" tugmasi -- feedback yuborgan foydalanuvchiga
+#  javob yozish rejimini yoqadi. Keyingi yozgan xabari (matn, rasm, video,
+#  hujjat) shu foydalanuvchiga yuboriladi -- mexanizm allaqachon
+#  text_router.py va media.py da tayyor (state.admin_reply_to orqali),
+#  bu yerda faqat uni ishga tushiramiz.
+# ════════════════════════════════════════════════════════════
+@app.on_callback_query(admin_filter & filters.create(lambda _, __, q: q.data.startswith("fb_reply:")))
+async def start_admin_reply(client, call):
+    target_uid = int(call.data.split(":")[1])
+    state.admin_reply_to[ADMIN_ID] = target_uid
+    await call.answer()
+    await client.send_message(
+        call.message.chat.id,
+        f"↩️ Javobingizni yozing (matn, rasm, video yoki hujjat) -- foydalanuvchiga (`{target_uid}`) yuboriladi:",
+        parse_mode=enums.ParseMode.MARKDOWN,
+    )
 
 
 async def _post_to_channel(client, message, flow) -> bool:

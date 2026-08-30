@@ -50,6 +50,23 @@ async def on_text(client, message):
     lang = database.get_lang(uid) or "uz"
     t    = texts_mod.TEXTS.get(lang, texts_mod.TEXTS["uz"])
 
+    # ── Admin replying to a user (eng ustuvor -- boshqa hech qanday oqim
+    # admin javob rejimidagi matnni ushlab qolmasin) ──
+    if uid == ADMIN_ID and ADMIN_ID in state.admin_reply_to:
+        target_uid = state.admin_reply_to.pop(ADMIN_ID, None)
+        if target_uid:
+            target_lang = database.get_lang(target_uid) or "uz"
+            try:
+                await client.send_message(
+                    target_uid,
+                    f"{texts_mod.TEXTS[target_lang]['reply_from_admin']}\n\n{text}",
+                    parse_mode=enums.ParseMode.MARKDOWN,
+                )
+                await message.reply(texts_mod.TEXTS["uz"]["admin_reply_sent"])
+            except Exception as e:
+                await message.reply(f"❌ Yuborishda xato: {e}")
+        return
+
     # ── Fikr-mulohaza: matn kiritilishi kutilmoqda ──
     # (agar foydalanuvchi shu payt boshqa menyu tugmasini bossa, feedback
     # holati bekor qilinadi va o'sha tugmaning o'z ishi bajariladi --
@@ -177,22 +194,6 @@ async def on_text(client, message):
             await create_and_send_zip(client, info["chat_id"], uid, info["zip_name"], password=password)
         return
 
-
-    # ── Admin replying to user ──
-    if uid == ADMIN_ID and ADMIN_ID in state.admin_reply_to:
-        target_uid = state.admin_reply_to.pop(ADMIN_ID, None)
-        if target_uid:
-            target_lang = database.get_lang(target_uid) or "uz"
-            try:
-                await client.send_message(
-                    target_uid,
-                    f"{texts_mod.TEXTS[target_lang]['reply_from_admin']}\n\n{text}",
-                    parse_mode=enums.ParseMode.MARKDOWN,
-                )
-                await message.reply(texts_mod.TEXTS["uz"]["admin_reply_sent"])
-            except Exception as e:
-                await message.reply(f"❌ Yuborishda xato: {e}")
-        return
 
     # ── Admin broadcast ──
     if uid == ADMIN_ID and uid in state.broadcast_mode:
