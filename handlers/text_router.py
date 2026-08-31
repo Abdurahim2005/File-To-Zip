@@ -71,7 +71,7 @@ async def on_text(client, message):
     # (agar foydalanuvchi shu payt boshqa menyu tugmasini bossa, feedback
     # holati bekor qilinadi va o'sha tugmaning o'z ishi bajariladi --
     # aks holda tugma nomi ham "feedback matni" sifatida yuborilib qolar edi)
-    _menu_buttons = {"⭐ Premium", t.get("btn_stats"), t.get("btn_contact"), t.get("btn_feedback"), t.get("btn_top"), "🔐 Admin panel"}
+    _menu_buttons = {"⭐ Premium", t.get("btn_stats"), t.get("btn_contact"), t.get("btn_feedback"), t.get("btn_top"), t.get("btn_myid"), "🔐 Admin panel"}
     if uid in state.user_feedback_flow:
         if text in _menu_buttons or text.startswith("/"):
             info = state.user_feedback_flow.pop(uid, None)
@@ -146,6 +146,22 @@ async def on_text(client, message):
                 today_mb=s["today_mb"],
             ),
             parse_mode=enums.ParseMode.MARKDOWN,
+        )
+        return
+
+    # ── Keyboard button: Mening ID'im ──
+    if text == t.get("btn_myid"):
+        await safe_delete(message)
+        full_name = (message.from_user.first_name or "") + (
+            f" {message.from_user.last_name}" if message.from_user.last_name else ""
+        )
+        await client.send_message(
+            message.chat.id,
+            tx(uid, "myid_text", name=full_name.strip() or "—", id=uid),
+            parse_mode=enums.ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton(f"🆔 {uid}", callback_data=f"myid_copy:{uid}")
+            ]]),
         )
         return
 

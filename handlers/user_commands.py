@@ -300,3 +300,12 @@ async def cb_pw_yes(client, call):
             await create_and_send_zip(client, cur["chat_id"], uid, cur["zip_name"])
 
     asyncio.ensure_future(_password_timeout())
+
+
+# ════════════════════════════════════════════════════════════
+#  "MENING ID'IM" -- ID'ni popup orqali ko'rsatish (nusxalash uchun qulay)
+# ════════════════════════════════════════════════════════════
+@app.on_callback_query(filters.create(lambda _, __, q: q.data.startswith("myid_copy:")))
+async def show_myid_popup(client, call):
+    uid_str = call.data.split(":")[1]
+    await call.answer(f"🆔 {uid_str}", show_alert=True)
