@@ -126,6 +126,13 @@ TEXTS = {
         "btn_donate":       "💰 Donat",
         "btn_stats":        "📊 Statistika",
         "btn_top":          "🏆 Top-10",
+        "btn_myid":         "🆔 Mening ID'im",
+        "myid_text": (
+            "🆔 *Sizning ma'lumotlaringiz*\n\n"
+            "👤 Ism: *{name}*\n"
+            "🆔 ID: `{id}`"
+        ),
+        "btn_myid_copy":    "📋 ID'ni nusxalash",
         "btn_contact":      "📞 Admin bilan bog'lanish",
         "btn_feedback":     "💬 Fikr-mulohaza",
         "fb_choose_target": "💬 Fikringizni qayerga yubormoqchisiz?",
@@ -306,6 +313,13 @@ TEXTS = {
         "btn_donate":       "💰 Donate",
         "btn_stats":        "📊 Statistics",
         "btn_top":          "🏆 Top-10",
+        "btn_myid":         "🆔 My ID",
+        "myid_text": (
+            "🆔 *Your info*\n\n"
+            "👤 Name: *{name}*\n"
+            "🆔 ID: `{id}`"
+        ),
+        "btn_myid_copy":    "📋 Copy ID",
         "btn_contact":      "📞 Contact admin",
         "btn_feedback":     "💬 Feedback",
         "fb_choose_target": "💬 Where do you want to send your message?",
