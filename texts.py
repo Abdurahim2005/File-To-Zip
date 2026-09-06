@@ -126,13 +126,18 @@ TEXTS = {
         "btn_donate":       "💰 Donat",
         "btn_stats":        "📊 Statistika",
         "btn_top":          "🏆 Top-10",
-        "btn_myid":         "🆔 Mening ID'im",
+        "btn_myid":         "👤 Kabinetim",
         "myid_text": (
-            "🆔 *Sizning ma'lumotlaringiz*\n\n"
-            "👤 Ism: *{name}*\n"
-            "🆔 ID: `{id}`"
+            "👤 *Kabinetim*\n\n"
+            "📛 Ism: *{name}*\n"
+            "🆔 ID: `{id}`\n"
+            "🏷 Daraja: *{level}*\n\n"
+            "📦 Bugungi ZIP: *{today_zips}/{max_zips}*\n"
+            "🔐 Bugungi parolli ZIP: *{today_pw}/{max_pw}*\n"
+            "📊 Umumiy yasalgan ZIP: *{total_zips}* ta\n"
+            "📁 Saqlangan fayllar: *{file_count}* ta\n"
+            "💾 Xotira: *{used_storage} / {max_storage}*"
         ),
-        "btn_myid_copy":    "📋 ID'ni nusxalash",
         "btn_contact":      "📞 Admin bilan bog'lanish",
         "btn_feedback":     "💬 Fikr-mulohaza",
         "fb_choose_target": "💬 Fikringizni qayerga yubormoqchisiz?",
@@ -313,13 +318,18 @@ TEXTS = {
         "btn_donate":       "💰 Donate",
         "btn_stats":        "📊 Statistics",
         "btn_top":          "🏆 Top-10",
-        "btn_myid":         "🆔 My ID",
+        "btn_myid":         "👤 My Cabinet",
         "myid_text": (
-            "🆔 *Your info*\n\n"
-            "👤 Name: *{name}*\n"
-            "🆔 ID: `{id}`"
+            "👤 *My Cabinet*\n\n"
+            "📛 Name: *{name}*\n"
+            "🆔 ID: `{id}`\n"
+            "🏷 Level: *{level}*\n\n"
+            "📦 Today's ZIPs: *{today_zips}/{max_zips}*\n"
+            "🔐 Today's password ZIPs: *{today_pw}/{max_pw}*\n"
+            "📊 Total ZIPs created: *{total_zips}*\n"
+            "📁 Stored files: *{file_count}*\n"
+            "💾 Storage: *{used_storage} / {max_storage}*"
         ),
-        "btn_myid_copy":    "📋 Copy ID",
         "btn_contact":      "📞 Contact admin",
         "btn_feedback":     "💬 Feedback",
         "fb_choose_target": "💬 Where do you want to send your message?",
