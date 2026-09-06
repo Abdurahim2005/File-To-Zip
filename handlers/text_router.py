@@ -149,19 +149,34 @@ async def on_text(client, message):
         )
         return
 
-    # ── Keyboard button: Mening ID'im ──
+    # ── Keyboard button: Kabinetim ──
     if text == t.get("btn_myid"):
         await safe_delete(message)
         full_name = (message.from_user.first_name or "") + (
             f" {message.from_user.last_name}" if message.from_user.last_name else ""
         )
+
+        is_prem       = database.is_premium(uid)
+        level         = "⭐ Premium" if is_prem else "🔹 Oddiy"
+        max_zips, max_storage = database.get_user_limits(uid)
+        today_zips    = database.get_daily_zip_count(uid)
+        max_pw        = database.get_user_pw_zip_limit(uid)
+        today_pw      = database.get_pw_zips_used_today(uid)
+        total_zips    = database.get_user_zip_total(uid)
+        fcount        = file_count(uid)
+        used_storage  = disk_used(uid)
+
         await client.send_message(
             message.chat.id,
-            tx(uid, "myid_text", name=full_name.strip() or "—", id=uid),
+            tx(
+                uid, "myid_text",
+                name=full_name.strip() or "—", id=uid, level=level,
+                today_zips=today_zips, max_zips=max_zips,
+                today_pw=today_pw, max_pw=max_pw,
+                total_zips=total_zips, file_count=fcount,
+                used_storage=fmt_size(used_storage), max_storage=fmt_size(max_storage),
+            ),
             parse_mode=enums.ParseMode.MARKDOWN,
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton(f"🆔 {uid}", callback_data=f"myid_copy:{uid}")
-            ]]),
         )
         return
 
