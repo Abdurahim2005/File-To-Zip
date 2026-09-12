@@ -5,10 +5,13 @@ import zipfile
 
 import pyzipper
 from pyrogram import enums
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 import database
 import state
+import texts as texts_mod
 from texts import tx
+from config import PREMIUM_PRICE_UZS, PREMIUM_PRICE_USDT
 from fs_utils import user_dir, sanitize_zip_name
 from helpers import safe_delete
 
@@ -104,6 +107,20 @@ async def create_and_send_zip(client, chat_id: int, uid: int, zip_name_raw: str,
             database.add_zip_stat(uid, zip_size / 1024 / 1024, fcount)
             if password:
                 database.register_pw_zip_used(uid)
+
+            # ── Kunlik limit haqida xabar (faqat oddiy foydalanuvchilar uchun) ──
+            if not database.is_premium(uid):
+                max_zips, _ = database.get_user_limits(uid)
+                used = database.get_daily_zip_count(uid)
+                if used >= max_zips:
+                    await _send_premium_promo(client, chat_id, uid, max_zips)
+                else:
+                    left = max_zips - used
+                    await client.send_message(
+                        chat_id,
+                        tx(uid, "daily_limit_left", used=used, max=max_zips, left=left),
+                        parse_mode=enums.ParseMode.MARKDOWN,
+                    )
         except Exception as e:
             await client.send_message(chat_id, tx(uid, "zip_error"), parse_mode=enums.ParseMode.MARKDOWN)
             return
@@ -122,6 +139,34 @@ async def create_and_send_zip(client, chat_id: int, uid: int, zip_name_raw: str,
         print(f"[cleanup] {e}")
 
     state.user_auto_zip.pop(uid, None)
+
+
+# ════════════════════════════════════════════════════════════
+#  KUNLIK LIMIT TUGAGANDA: PREMIUM REKLAMASI
+# ════════════════════════════════════════════════════════════
+async def _send_premium_promo(client, chat_id: int, uid: int, max_zips: int):
+    lang = database.get_lang(uid) or "uz"
+    reg_zips, reg_storage = state.DEFAULT_ZIPS_DAY, int(state.DEFAULT_STORAGE / 1024 / 1024)
+    prem = database.get_premium_settings()
+
+    reached_text = tx(uid, "daily_limit_reached", max=max_zips)
+    premium_text = texts_mod.TEXTS[lang]["premium_info"].format(
+        reg_zips=reg_zips, reg_storage=reg_storage,
+        reg_files=state.MAX_FILES, reg_pw=state.DEFAULT_PW_ZIPS_DAY,
+        prem_zips=prem["zips_day"], prem_storage=prem["storage_mb"],
+        prem_files=prem["files"], prem_pw=prem["pw_zips_day"],
+        price_uzs=PREMIUM_PRICE_UZS, price_usdt=PREMIUM_PRICE_USDT,
+    )
+
+    await client.send_message(
+        chat_id,
+        reached_text + "\n\n" + premium_text,
+        parse_mode=enums.ParseMode.MARKDOWN,
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton(tx(uid, "btn_get_premium"), callback_data="topup:start")
+        ]]),
+        disable_web_page_preview=True,
+    )
 
 
 # ════════════════════════════════════════════════════════════
