@@ -133,6 +133,14 @@ async def _send_daily_limit_msg(client, chat_id: int, uid: int):
     max_zips, _ = database.get_user_limits(uid)
     await client.send_message(chat_id, tx(uid, "daily_limit", limit=max_zips), parse_mode=enums.ParseMode.MARKDOWN)
 
+    # Foydalanuvchi premium bo'lmasa, shu yerda ham Premium reklamasini
+    # ko'rsatamiz -- limit tugagan holatda fayl yuborishga urinib ko'rgan
+    # har qanday holatda ham reklama chiqishi kerak, faqat ZIP yaratilgan
+    # paytda emas.
+    if not database.is_premium(uid):
+        from zip_ops import _send_premium_promo
+        await _send_premium_promo(client, chat_id, uid, max_zips)
+
 def schedule_limit_msg(client, chat_id: int, uid: int):
     schedule_task(state.user_limit_debounce, uid, _send_daily_limit_msg(client, chat_id, uid))
 
