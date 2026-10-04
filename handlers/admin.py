@@ -11,7 +11,7 @@ import texts as texts_mod
 from config import ADMIN_ID, TURSO_URL, LOCAL_DB
 from bot_instance import app, admin_filter
 from texts import tx
-from fs_utils import file_count, fmt_size, make_zip_name, total_disk_all
+from fs_utils import file_count, fmt_size, make_zip_name, total_disk_all, all_users_disk
 from helpers import safe_delete, send_sticker
 from batch import cancel_task, schedule_task
 from zip_ops import create_and_send_zip
@@ -173,7 +173,7 @@ async def adm_clear(client, call):
 
 @app.on_callback_query(admin_filter & filters.create(lambda _, __, q: q.data == "adm_disk"))
 async def adm_disk(client, call):
-    rows = database.all_users_disk()
+    rows = all_users_disk()
     if not rows:
         await call.message.reply("💾 Diskda hech narsa yo'q."); await call.answer(); return
     db_map = {u[0]: (u[1], u[2], u[3]) for u in database.all_users()}
@@ -210,7 +210,7 @@ async def adm_disk(client, call):
 
 @app.on_callback_query(admin_filter & filters.create(lambda _, __, q: q.data == "adm_clear_all"))
 async def adm_clear_all(client, call):
-    rows = database.all_users_disk()
+    rows = all_users_disk()
     total_sz = sum(r[1] for r in rows)
     await call.message.reply(
         f"⚠️ *Diqqat!*\n\n*{len(rows)}* ta foydalanuvchining *{fmt_size(total_sz)}* hajmidagi "
