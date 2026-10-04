@@ -184,15 +184,85 @@ async def adm_disk(client, call):
         name = f"{info[0]} {info[1]}".strip() if info else "Noma'lum"
         ustr = f"@{info[2]}" if (info and info[2]) else "—"
         _, ms = database.get_user_limits(uid)
-        pct = used / ms * 100
-        bar = "█" * min(int(pct / 5), 20)
-        lines.append(f"`{i}.` {name} ({ustr})\n   🆔 `{uid}` | {fmt_size(used)} ({pct:.1f}%) {bar}")
+        if ms and ms > 0:
+            pct = used / ms * 100
+            bar = "█" * min(int(pct / 5), 20)
+            pct_str = f" ({pct:.1f}%) {bar}"
+        else:
+            pct_str = " (limit: cheksiz/0)"
+        lines.append(f"`{i}.` {name} ({ustr})\n   🆔 `{uid}` | {fmt_size(used)}{pct_str}")
     if len(rows) > 30:
         lines.append(f"\n… va yana *{len(rows)-30}* ta")
+    lines.append("\n🗑️ Hammasini bir yoʻla tozalash uchun pastdagi tugmani bosing.")
     text = "\n".join(lines)
-    for chunk in [text[i:i+4000] for i in range(0, len(text), 4000)]:
+    chunks = [text[i:i+4000] for i in range(0, len(text), 4000)]
+    for chunk in chunks[:-1]:
         await call.message.reply(chunk, parse_mode=enums.ParseMode.MARKDOWN)
+    await call.message.reply(
+        chunks[-1],
+        parse_mode=enums.ParseMode.MARKDOWN,
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🧨 Hammasini tozalash", callback_data="adm_clear_all")],
+        ]),
+    )
     await call.answer()
+
+
+@app.on_callback_query(admin_filter & filters.create(lambda _, __, q: q.data == "adm_clear_all"))
+async def adm_clear_all(client, call):
+    rows = database.all_users_disk()
+    total_sz = sum(r[1] for r in rows)
+    await call.message.reply(
+        f"⚠️ *Diqqat!*\n\n*{len(rows)}* ta foydalanuvchining *{fmt_size(total_sz)}* hajmidagi "
+        f"barcha fayllari butunlay oʻchiriladi. Bu amalni ortga qaytarib boʻlmaydi.\n\n"
+        f"Davom etishni tasdiqlaysizmi?",
+        parse_mode=enums.ParseMode.MARKDOWN,
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Ha, hammasini tozala", callback_data="adm_clear_all_confirm"),
+             InlineKeyboardButton("❌ Bekor qilish", callback_data="adm_clear_all_cancel")],
+        ]),
+    )
+    await call.answer()
+
+
+@app.on_callback_query(admin_filter & filters.create(lambda _, __, q: q.data == "adm_clear_all_cancel"))
+async def adm_clear_all_cancel(client, call):
+    await call.message.edit_text("❌ Bekor qilindi.")
+    await call.answer()
+
+
+@app.on_callback_query(admin_filter & filters.create(lambda _, __, q: q.data == "adm_clear_all_confirm"))
+async def adm_clear_all_confirm(client, call):
+    import shutil
+    from config import BASE_DIR
+
+    await call.answer("Tozalanmoqda...")
+    cleared = 0
+    freed = 0
+    if os.path.exists(BASE_DIR):
+        for folder in os.listdir(BASE_DIR):
+            fp = os.path.join(BASE_DIR, folder)
+            if not os.path.isdir(fp):
+                continue
+            try:
+                uid = int(folder)
+            except ValueError:
+                continue
+            size = sum(
+                os.path.getsize(os.path.join(fp, f))
+                for f in os.listdir(fp)
+                if os.path.isfile(os.path.join(fp, f))
+            )
+            if size <= 0:
+                continue
+            shutil.rmtree(fp)
+            os.makedirs(fp, exist_ok=True)
+            cleared += 1
+            freed += size
+    await call.message.edit_text(
+        f"✅ *Tozalandi!*\n\n👥 *{cleared}* ta foydalanuvchi\n💾 *{fmt_size(freed)}* bo'shatildi.",
+        parse_mode=enums.ParseMode.MARKDOWN,
+    )
 
 @app.on_callback_query(admin_filter & filters.create(lambda _, __, q: q.data == "adm_channels"))
 async def adm_channels(client, call):
